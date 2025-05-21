@@ -84,6 +84,17 @@ client.once(Events.ClientReady, readyClient => {
   console.log(`✅ Bot iniciado como ${readyClient.user.tag}`);
 });
 
+const express = require("express");
+const app = express();
+
+app.get("/", (req, res) => {
+  res.send("El bot está vivo.");
+});
+
+app.listen(3000, () => {
+  console.log("Servidor HTTP escuchando en el puerto 3000");
+});
+
 
 // Iniciar sesión con el token del bot
 client.login(token);
