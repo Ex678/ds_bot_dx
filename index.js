@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Client, Events, GatewayIntentBits, Collection } = require('discord.js');
 const { token } = require('./config.json');
+const youtubeNotifier = require('./events/youtubeNotifier.js');
 
 // Creando una nueva instancia del cliente
 const client = new Client({
@@ -82,6 +83,7 @@ client.on(Events.InteractionCreate, async interaction => {
 // Evento: el bot está listo
 client.once(Events.ClientReady, readyClient => {
   console.log(`✅ Bot iniciado como ${readyClient.user.tag}`);
+  youtubeNotifier(readyClient);
 });
 
 const express = require("express");
