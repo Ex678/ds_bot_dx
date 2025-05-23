@@ -4,6 +4,7 @@ const path = require('node:path');
 const { Client, Events, GatewayIntentBits, Collection } = require('discord.js');
 const { token } = require('./config.json');
 const youtubeNotifier = require('./events/youtubeNotifier.js');
+const { handleMessageForXP, checkAndHandleLevelUp, handleRoleRewards } = require('./features/levelingSystem.js');
 
 // Creando una nueva instancia del cliente
 const client = new Client({
@@ -84,6 +85,26 @@ client.on(Events.InteractionCreate, async interaction => {
 client.once(Events.ClientReady, readyClient => {
   console.log(`✅ Bot iniciado como ${readyClient.user.tag}`);
   youtubeNotifier(readyClient);
+});
+
+// Evento: Mensaje creado (para sistema de niveles)
+client.on(Events.MessageCreate, async message => {
+  // Ya se maneja en handleMessageForXP, pero una comprobación temprana no hace daño.
+  if (message.author.bot) return; 
+
+  try {
+    const updatedUserData = await handleMessageForXP(message);
+    if (updatedUserData) {
+      const finalUserData = await checkAndHandleLevelUp(message, updatedUserData);
+      if (finalUserData && message.member) { // Ensure finalUserData is not null and member exists
+        await handleRoleRewards(message.member, finalUserData);
+      } else if (!message.member) {
+        console.warn(`[Index] message.member is null for user ${message.author.id} in guild ${message.guildId}. Cannot process role rewards.`);
+      }
+    }
+  } catch (error) {
+    console.error('[Index] Error processing message for XP, Level Up, or Role Rewards:', error);
+  }
 });
 
 const express = require("express");
