@@ -7,8 +7,7 @@ const { EmbedBuilder } = require('discord.js');
 let config = {};
 let youtubeApiKey;
 
-const configPath = path.join(__dirname, 'config.json');
-
+const configPath = path.join(__dirname, '../config.json');
 try {
   if (fsSync.existsSync(configPath)) {
     config = require(configPath);
