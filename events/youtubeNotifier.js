@@ -1,20 +1,19 @@
 const fs = require('fs/promises');
 const fsSync = require('fs');
 const path = require('path');
-const { google } = require('googleapis');
+const axios = require('axios');
+const { parseStringPromise } = require('xml2js');
 const { EmbedBuilder } = require('discord.js');
 
 let config = {};
-let youtubeApiKey;
 
 const configPath = path.join(__dirname, '../config.json');
 try {
   if (fsSync.existsSync(configPath)) {
     config = require(configPath);
-    if (config.youtubeApiKey) {
-      youtubeApiKey = config.youtubeApiKey;
-    } else {
-      console.warn('[YouTube Notifier] youtubeApiKey no encontrada en config.json. Usando placeholder. El notificador no funcionará hasta que se configure una clave válida.');
+    // youtubeApiKey related warnings can be removed or adjusted if no longer needed elsewhere
+    if (!config.youtubeApiKey) {
+      console.warn('[YouTube Notifier] youtubeApiKey no encontrada en config.json. Esta clave ya no es necesaria para el notificador de YouTube mediante RSS.');
     }
     if (!config.guildId) {
       console.warn('[YouTube Notifier] guildId no encontrado en config.json. Algunas funciones pueden no funcionar como se espera.');
@@ -29,17 +28,12 @@ try {
   console.error('[YouTube Notifier] Error al cargar config.json:', error);
 }
 
-const YOUTUBE_CHANNEL_ID = 'UCWqayy4sixf662hYgH9hUiA';
-const DISCORD_ANNOUNCEMENT_CHANNEL_ID = '1177420370895187988';
+const YOUTUBE_CHANNEL_ID = 'UCX6OQ3DkcsbYNE6H8uQQuVA'; // Test Channel: Google Developers
+const DISCORD_ANNOUNCEMENT_CHANNEL_ID = '123456789012345678'; // Test Discord Channel ID
 const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const lastVideoIdPath = path.join(__dirname, 'lastVideoId.json');
 
-let youtube;
-if (youtubeApiKey !== 'YOUR_YOUTUBE_API_KEY_PLACEHOLDER') {
-  youtube = google.youtube({ version: 'v3', auth: youtubeApiKey });
-} else {
-  console.warn('[YouTube Notifier] La API de YouTube no se inicializará porque se está usando una clave API de placeholder.');
-}
+// youtube variable and its initialization are removed as API is no longer used.
 
 async function readLastVideoId() {
   try {
@@ -66,52 +60,61 @@ async function writeLastVideoId(videoId) {
 }
 
 async function checkNewVideos(client) {
-  console.log('[YouTube Notifier] Iniciando ciclo checkNewVideos.');
-  const apiKeyForLog = (youtubeApiKey && youtubeApiKey !== "YOUR_YOUTUBE_API_KEY_PLACEHOLDER") 
-    ? `${youtubeApiKey.substring(0, 5)}...${youtubeApiKey.substring(youtubeApiKey.length - 5)}`
-    : "No seteada o es placeholder";
-  console.log(`[YouTube Notifier] Clave API usada: ${apiKeyForLog}`);
-
-  if (!youtube || youtubeApiKey === 'YOUR_YOUTUBE_API_KEY_PLACEHOLDER') {
-    console.error('[YouTube Notifier] No se puede buscar videos: youtubeApiKey no está configurada o es un placeholder.');
-    return;
-  }
+  console.log('[YouTube Notifier] Iniciando ciclo checkNewVideos con RSS.');
+  const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${YOUTUBE_CHANNEL_ID}`;
+  console.log(`[YouTube Notifier] RSS URL: ${rssUrl}`); // Enhanced Logging
 
   try {
-    console.log(`[YouTube Notifier] Obteniendo videos del canal ID: ${YOUTUBE_CHANNEL_ID}`);
-    const response = await youtube.search.list({
-      part: 'snippet',
-      channelId: YOUTUBE_CHANNEL_ID,
-      order: 'date',
-      maxResults: 1,
-      type: 'video',
-    });
+    console.log(`[YouTube Notifier] Obteniendo videos del canal ID: ${YOUTUBE_CHANNEL_ID} desde ${rssUrl}`);
+    const response = await axios.get(rssUrl, { timeout: 10000 }); // Added timeout
+    const xmlData = response.data;
+    console.log(`[YouTube Notifier] Raw XML (Snippet): ${xmlData.substring(0, 500)}...`); // Enhanced Logging
 
-    const items = response.data.items || [];
-    console.log(`[YouTube Notifier] Respuesta de la API: ${items.length} items encontrados.`);
+    console.log('[YouTube Notifier] Parseando datos XML...');
+    const parsedData = await parseStringPromise(xmlData);
+    if (parsedData.feed && parsedData.feed.entry && parsedData.feed.entry.length > 0) { // Enhanced Logging
+      console.log(`[YouTube Notifier] Parsed XML (First Entry): ${JSON.stringify(parsedData.feed.entry[0], null, 2)}`);
+    } else {
+      console.log('[YouTube Notifier] Parsed XML: No entries found or feed structure is unexpected.');
+    }
 
-    if (items.length > 0) {
-      const latestVideo = items[0];
-      console.log(`[YouTube Notifier] Datos del último video: ${JSON.stringify(latestVideo.snippet)}`);
-      const currentVideoId = latestVideo?.id?.videoId;
+    const entries = parsedData.feed.entry;
 
-      if (currentVideoId && latestVideo.snippet) {
+    if (entries && entries.length > 0) {
+      const latestEntry = entries[0];
+      const currentVideoId = latestEntry['yt:videoId']?.[0];
+      const videoTitle = latestEntry.title?.[0];
+      const videoUrl = latestEntry.link?.[0]?.$?.href;
+      const publishedDate = latestEntry.published?.[0];
+      const thumbnailUrl = latestEntry['media:group']?.[0]?.['media:thumbnail']?.[0]?.$?.url;
+      const channelTitle = parsedData.feed.author?.[0]?.name?.[0] || 'Canal de YouTube'; // Fallback channel title
+
+      // Enhanced Logging for extracted details
+      console.log('[YouTube Notifier] Extracted Video Details:');
+      console.log(`  ID: ${currentVideoId}`);
+      console.log(`  Title: ${videoTitle}`);
+      console.log(`  URL: ${videoUrl}`);
+      console.log(`  Thumbnail URL: ${thumbnailUrl}`);
+      console.log(`  Published Date: ${publishedDate}`);
+      console.log(`  Channel Title: ${channelTitle}`);
+
+      if (currentVideoId && videoTitle && videoUrl && publishedDate && thumbnailUrl) {
         const lastVideoId = await readLastVideoId();
         console.log(`[YouTube Notifier] Último video leído de archivo: ${lastVideoId}`);
+        console.log(`[YouTube Notifier] Comparando: currentVideoId (${currentVideoId}) vs lastVideoId (${lastVideoId})`); // Enhanced Logging
 
         if (currentVideoId !== lastVideoId) {
           console.log(`[YouTube Notifier] ¡Nuevo video detectado! Anunciando...`);
           const discordChannel = await client.channels.fetch(DISCORD_ANNOUNCEMENT_CHANNEL_ID);
 
           if (discordChannel) {
-            const videoUrl = `https://www.youtube.com/watch?v=${currentVideoId}`;
             const embed = new EmbedBuilder()
-              .setTitle(`🔴 ¡Nuevo Video de ${latestVideo.snippet.channelTitle}!`)
-              .setDescription(latestVideo.snippet.title)
+              .setTitle(`🔴 ¡Nuevo Video de ${channelTitle}!`)
+              .setDescription(videoTitle)
               .setURL(videoUrl)
-              .setImage(latestVideo.snippet.thumbnails.high.url)
+              .setImage(thumbnailUrl)
               .setColor(0xFF0000)
-              .setTimestamp(new Date(latestVideo.snippet.publishedAt))
+              .setTimestamp(new Date(publishedDate))
               .setFooter({ text: '¡No te lo pierdas!' });
 
             try {
@@ -129,15 +132,20 @@ async function checkNewVideos(client) {
           console.log('[YouTube Notifier] No hay videos nuevos.');
         }
       } else {
-        console.warn('[YouTube Notifier] El video más reciente no tiene ID o snippet válido.');
+        console.warn('[YouTube Notifier] El video más reciente del RSS no tiene todos los datos esperados.');
+        console.log(`[YouTube Notifier] Datos extraídos: ID=${currentVideoId}, Title=${videoTitle}, URL=${videoUrl}, Published=${publishedDate}, Thumbnail=${thumbnailUrl}`);
       }
     } else {
-      console.log('[YouTube Notifier] No se encontraron videos nuevos.');
+      console.log('[YouTube Notifier] No se encontraron entradas de video en el feed RSS.');
     }
   } catch (error) {
-    console.error('[YouTube Notifier] Error al obtener o procesar videos de YouTube:', error.message);
-    if (error.response?.data?.error) {
-      console.error('[YouTube Notifier] Detalles del error de la API de YouTube:', JSON.stringify(error.response.data.error));
+    console.error('[YouTube Notifier] Error al obtener o procesar el feed RSS de YouTube:', error.message);
+    if (error.response) { // Axios error specific
+        console.error('[YouTube Notifier] Detalles del error de fetching RSS:', error.response.status, error.response.data);
+    } else if (error.message.toLowerCase().includes('xml') || error.message.toLowerCase().includes('parsing')) { 
+         console.error('[YouTube Notifier] Detalles del error de parseo XML:', error);
+    } else if (error.code === 'ECONNABORTED') {
+        console.error('[YouTube Notifier] Error de timeout al obtener el feed RSS.');
     }
   }
 }
@@ -146,10 +154,11 @@ module.exports = (client) => {
   client.once('ready', () => {
     console.log(`[YouTube Notifier] Conectado a Discord como ${client.user.tag}`);
 
-    if (!youtube || youtubeApiKey === 'YOUR_YOUTUBE_API_KEY_PLACEHOLDER') {
-      console.warn('[YouTube Notifier] El notificador de YouTube no se iniciará porque la clave API no está configurada.');
-      return;
-    }
+    // API Key check is removed as it's no longer needed for RSS method
+    // if (!youtube || youtubeApiKey === 'YOUR_YOUTUBE_API_KEY_PLACEHOLDER') {
+    //   console.warn('[YouTube Notifier] El notificador de YouTube no se iniciará porque la clave API no está configurada.');
+    //   return;
+    // }
 
     if (config.guildId && !client.guilds.cache.has(config.guildId)) {
       console.warn(`[YouTube Notifier] El bot no está en el servidor con ID ${config.guildId}.`);
@@ -173,3 +182,41 @@ module.exports = (client) => {
     console.log(`[YouTube Notifier] Intervalo configurado: cada ${CHECK_INTERVAL_MS / 60000} minutos.`);
   });
 };
+
+// Mock client for testing as per subtask description
+const mockClient = {
+  channels: {
+    fetch: async (channelId) => {
+      console.log(`[Test Stub] Attempting to fetch channel ${channelId}`);
+      // Simulate finding a channel
+      return {
+        send: async (message) => {
+          console.log(`[Test Stub] Attempting to send message to channel ${channelId}:`, message.content, message.embeds[0].title);
+          return { id: 'mockMessageId' }; // Simulate a sent message object
+        },
+        name: 'mock-channel'
+      };
+    }
+  },
+  user: { tag: 'TestBot#0000' } // For the ready event log
+};
+
+// Test execution block
+if (require.main === module) {
+  (async () => {
+    console.log('[YouTube Notifier Test] Running in direct execution mode for testing.');
+    // Ensure lastVideoId.json is in a state to detect a new video (e.g., delete it or ensure it has an old ID)
+    try {
+      await fs.unlink(lastVideoIdPath);
+      console.log(`[YouTube Notifier Test] Deleted ${lastVideoIdPath} for a clean test run.`);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        console.log(`[YouTube Notifier Test] ${lastVideoIdPath} not found, which is fine for a clean test run.`);
+      } else {
+        console.error(`[YouTube Notifier Test] Error deleting ${lastVideoIdPath}:`, error);
+      }
+    }
+    await checkNewVideos(mockClient);
+    console.log('[YouTube Notifier Test] Test execution of checkNewVideos completed.');
+  })();
+}
