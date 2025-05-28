@@ -28,8 +28,8 @@ try {
   console.error('[YouTube Notifier] Error al cargar config.json:', error);
 }
 
-const YOUTUBE_CHANNEL_ID = 'UCX6OQ3DkcsbYNE6H8uQQuVA'; // Test Channel: Google Developers
-const DISCORD_ANNOUNCEMENT_CHANNEL_ID = '123456789012345678'; // Test Discord Channel ID
+const YOUTUBE_CHANNEL_ID = 'UCWqayy4sixf662hYgH9hUiA'; // Test Channel: Google Developers
+const DISCORD_ANNOUNCEMENT_CHANNEL_ID = '1177420370895187988'; // Test Discord Channel ID
 const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const lastVideoIdPath = path.join(__dirname, 'lastVideoId.json');
 
