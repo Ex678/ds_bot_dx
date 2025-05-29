@@ -10,18 +10,18 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@discordjs/voice": "^0.17.0",
     "axios": "^1.9.0",
     "canvas": "^2.11.2",
     "discord.js": "^14.19.3",
     "express": "^5.1.0",
-    "googleapis": "^149.0.0",
-    "openai": "^4.98.0",
-    "xml2js": "^0.6.2",
-    "@discordjs/voice": "^0.17.0",
-    "libsodium-wrappers": "^0.7.13",
-    "opusscript": "^0.1.1",
     "ffmpeg-static": "^5.2.0",
+    "googleapis": "^149.0.0",
+    "libsodium-wrappers": "^0.7.13",
+    "openai": "^4.98.0",
+    "opusscript": "^0.1.1",
     "play-dl": "^1.9.7",
-    "spotify-web-api-node": "^5.0.2"
+    "spotify-web-api-node": "^5.0.2",
+    "xml2js": "^0.6.2"
   }
 }
