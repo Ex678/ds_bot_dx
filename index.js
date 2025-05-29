@@ -99,14 +99,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
     try {
       if (!player || !queueData) {
-        // Defer update before replying ephemerally if no player/queue
-        if (!interaction.deferred) await interaction.deferUpdate().catch(console.warn);
-        await interaction.followUp({ content: 'No hay un reproductor de música activo o cola para este servidor.', ephemeral: true });
+        if (!interaction.deferred && !interaction.replied) await interaction.deferUpdate().catch(e => console.error(`[Interaction Error] Failed to deferUpdate for interaction ${interaction.id} (no player/queue): ${e.message}`, e));
+        try { await interaction.followUp({ content: 'No hay un reproductor de música activo o cola para este servidor.', ephemeral: true }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (no player/queue): ${e.message}`, e); }
         return;
       }
       
-      // Defer update to acknowledge the button press immediately
-      if (!interaction.deferred) await interaction.deferUpdate().catch(console.warn);
+      if (!interaction.deferred && !interaction.replied) await interaction.deferUpdate().catch(e => console.error(`[Interaction Error] Failed to deferUpdate for interaction ${interaction.id}: ${e.message}`, e));
 
       let feedbackMessage = '';
 
@@ -124,7 +122,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         new ButtonBuilder().setCustomId('music_stop').setLabel('Detener').setStyle(ButtonStyle.Danger).setEmoji('⏹️'),
                         new ButtonBuilder().setCustomId('music_view_queue').setLabel('Ver Cola').setStyle(ButtonStyle.Secondary).setEmoji('🎶')
                     );
-                queueData.nowPlayingMessage.edit({ embeds: [newEmbed], components: [newRow] }).catch(console.warn);
+                try { await queueData.nowPlayingMessage.edit({ embeds: [newEmbed], components: [newRow] }); } catch (e) { console.warn(`[Interaction Error] Failed to edit nowPlayingMessage for ${interaction.id} (pause): ${e.message}`, e); }
             }
           } else { feedbackMessage = 'No se pudo pausar.'; }
         } else if (player.state.status === VoiceAudioPlayerStatus.Paused) {
@@ -140,46 +138,52 @@ client.on(Events.InteractionCreate, async interaction => {
                         new ButtonBuilder().setCustomId('music_stop').setLabel('Detener').setStyle(ButtonStyle.Danger).setEmoji('⏹️'),
                         new ButtonBuilder().setCustomId('music_view_queue').setLabel('Ver Cola').setStyle(ButtonStyle.Secondary).setEmoji('🎶')
                     );
-                queueData.nowPlayingMessage.edit({ embeds: [newEmbed], components: [newRow] }).catch(console.warn);
+                try { await queueData.nowPlayingMessage.edit({ embeds: [newEmbed], components: [newRow] }); } catch (e) { console.warn(`[Interaction Error] Failed to edit nowPlayingMessage for ${interaction.id} (resume): ${e.message}`, e); }
             }
           } else { feedbackMessage = 'No se pudo reanudar.'; }
         } else {
           feedbackMessage = 'No hay música reproduciéndose o pausada para esta acción.';
         }
-        await interaction.followUp({ content: feedbackMessage, ephemeral: true });
+        try { await interaction.followUp({ content: feedbackMessage, ephemeral: true }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (pause/resume feedback): ${e.message}`, e); }
 
       } else if (customId === 'music_skip') {
         if (player.state.status === VoiceAudioPlayerStatus.Idle && queueData.tracks.length === 0) {
-          await interaction.followUp({ content: 'No hay nada reproduciendo para saltar.', ephemeral: true });
+          try { await interaction.followUp({ content: 'No hay nada reproduciendo para saltar.', ephemeral: true }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (skip - nothing playing): ${e.message}`, e); }
           return;
         }
-        player.stop(); // Triggers Idle, then playNextInQueue which sends new "Now Playing"
-        await interaction.followUp({ content: '⏭️ Canción saltada.', ephemeral: true });
+        player.stop(); 
+        try { await interaction.followUp({ content: '⏭️ Canción saltada.', ephemeral: true }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (skip success): ${e.message}`, e); }
 
       } else if (customId === 'music_stop') {
-        player.stop(true); // Stop the player entirely
-        queueData.tracks = []; // Clear the queue
-        queueData.currentTrack = null; // Clear current track info
+        player.stop(true); 
+        queueData.tracks = []; 
+        queueData.currentTrack = null; 
         if (queueData.nowPlayingMessage) {
-            // Delete the "Now Playing" message as music has stopped.
-            queueData.nowPlayingMessage.delete().catch(err => console.warn("Failed to delete NP message on button stop:", err.message));
+            try { await queueData.nowPlayingMessage.delete(); } catch (err) { console.warn("Failed to delete NP message on button stop:", err.message); }
             queueData.nowPlayingMessage = null;
         }
-        await interaction.followUp({ content: '⏹️ Música detenida y cola limpiada.', ephemeral: true });
-        // Optionally, you could make the bot leave the voice channel here after a timeout or directly.
-        // const connection = getVoiceConnection(guildId);
-        // if (connection) connection.destroy();
-
+        try { await interaction.followUp({ content: '⏹️ Música detenida y cola limpiada.', ephemeral: true }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (stop success): ${e.message}`, e); }
+        
       } else if (customId === 'music_view_queue') {
-        // queueCommand.execute expects a full interaction object.
-        // The button interaction object should work.
+        // queueCommand.execute already handles its own replies and try/catch for them.
+        // However, if queueCommand.execute itself throws an error before replying, it would be caught by the outer try/catch.
         await queueCommand.execute(interaction); 
       } else {
-        await interaction.followUp({ content: 'Botón desconocido.', ephemeral: true });
+        try { await interaction.followUp({ content: 'Botón desconocido.', ephemeral: true }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (unknown button): ${e.message}`, e); }
       }
     } catch (e) {
-        console.error("Error handling button interaction:", e);
-        await interaction.followUp({ content: 'Hubo un error procesando esta acción.', ephemeral: true });
+        console.error(`[Interaction Error] Error handling button interaction ${interaction.id}: ${e.message}`, e);
+        // General fallback if any of the above try/catch for followUp itself fails or if an error occurs before a reply attempt.
+        try {
+          if (!interaction.replied && !interaction.deferred) { // Should ideally always be deferred by now
+            await interaction.reply({ content: 'Hubo un error procesando esta acción.', ephemeral: true });
+          } else if (!interaction.replied) { // Deferred but not yet replied with followUp
+             await interaction.followUp({ content: 'Hubo un error procesando esta acción.', ephemeral: true });
+          }
+          // If already replied, nothing more to do here for this error.
+        } catch (e2) {
+            console.error(`[Interaction Error] Fallback reply failed for interaction ${interaction.id}: ${e2.message}`, e2);
+        }
     }
   }
 });
