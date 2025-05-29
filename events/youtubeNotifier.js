@@ -151,36 +151,30 @@ async function checkNewVideos(client) {
 }
 
 module.exports = (client) => {
-  client.once('ready', () => {
-    console.log(`[YouTube Notifier] Conectado a Discord como ${client.user.tag}`);
+  // Content from the old 'ready' block is now here directly
+  console.log(`[YouTube Notifier] Initializing for ${client.user.tag}...`); // Adjusted log message
 
-    // API Key check is removed as it's no longer needed for RSS method
-    // if (!youtube || youtubeApiKey === 'YOUR_YOUTUBE_API_KEY_PLACEHOLDER') {
-    //   console.warn('[YouTube Notifier] El notificador de YouTube no se iniciará porque la clave API no está configurada.');
-    //   return;
-    // }
+  // Perform guild checks, channel fetch, etc.
+  if (config.guildId && !client.guilds.cache.has(config.guildId)) {
+    console.warn(`[YouTube Notifier] El bot no está en el servidor con ID ${config.guildId}.`);
+  }
+  
+  client.channels.fetch(DISCORD_ANNOUNCEMENT_CHANNEL_ID)
+    .then(channel => {
+      if (!channel) {
+        console.error(`[YouTube Notifier] Canal de anuncios con ID ${DISCORD_ANNOUNCEMENT_CHANNEL_ID} no encontrado.`);
+      } else {
+        console.log(`[YouTube Notifier] Canal de anuncios encontrado: ${channel.name}`);
+      }
+    })
+    .catch(err => {
+      console.error(`[YouTube Notifier] Error al buscar canal:`, err.message);
+    });
 
-    if (config.guildId && !client.guilds.cache.has(config.guildId)) {
-      console.warn(`[YouTube Notifier] El bot no está en el servidor con ID ${config.guildId}.`);
-    }
-
-    client.channels.fetch(DISCORD_ANNOUNCEMENT_CHANNEL_ID)
-      .then(channel => {
-        if (!channel) {
-          console.error(`[YouTube Notifier] Canal de anuncios con ID ${DISCORD_ANNOUNCEMENT_CHANNEL_ID} no encontrado.`);
-        } else {
-          console.log(`[YouTube Notifier] Canal de anuncios encontrado: ${channel.name}`);
-        }
-      })
-      .catch(err => {
-        console.error(`[YouTube Notifier] Error al buscar canal:`, err.message);
-      });
-
-    checkNewVideos(client);
-    console.log('[YouTube Notifier] Revisión inicial ejecutada.');
-    setInterval(() => checkNewVideos(client), CHECK_INTERVAL_MS);
-    console.log(`[YouTube Notifier] Intervalo configurado: cada ${CHECK_INTERVAL_MS / 60000} minutos.`);
-  });
+  checkNewVideos(client);
+  console.log('[YouTube Notifier] Revisión inicial ejecutada.');
+  setInterval(() => checkNewVideos(client), CHECK_INTERVAL_MS);
+  console.log(`[YouTube Notifier] Intervalo configurado: cada ${CHECK_INTERVAL_MS / 60000} minutos.`);
 };
 
 // Mock client for testing as per subtask description

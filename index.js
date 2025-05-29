@@ -21,6 +21,10 @@ const eventsPath = path.join(__dirname, 'events');
 const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'));
 
 for (const file of eventFiles) {
+	if (file === 'youtubeNotifier.js') {
+		console.log('[Index Event Loader] Skipping youtubeNotifier.js as it is loaded manually.');
+		continue;
+	}
 	const filePath = path.join(eventsPath, file);
 	const event = require(filePath);
 
