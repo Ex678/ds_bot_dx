@@ -3,8 +3,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Client, Events, GatewayIntentBits, Collection } = require('discord.js');
 const { token } = require('./config.json');
+const { setDebugLogging } = require('@discordjs/voice'); // Import for voice debug logging
 const youtubeNotifier = require('./events/youtubeNotifier.js');
 const { handleMessageForXP, checkAndHandleLevelUp, handleRoleRewards } = require('./features/levelingSystem.js');
+
+// Enable @discordjs/voice debug logging
+setDebugLogging(true);
+console.log('[Main] @discordjs/voice debug logging enabled.');
 
 // Creando una nueva instancia del cliente
 const client = new Client({
