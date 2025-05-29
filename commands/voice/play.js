@@ -22,7 +22,7 @@ async function playNextInQueue(guildId, interactionChannel) {
     console.log(`[Queue System ${guildId}] Player, queue data, or connection missing. Cannot play next.`);
     if (queueData && queueData.tracks.length === 0 && queueData.lastInteractionChannel) {
         const endEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('La cola ha terminado.');
-        queueData.lastInteractionChannel.send({ embeds: [endEmbed] }).catch(console.error);
+        try { await queueData.lastInteractionChannel.send({ embeds: [endEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "queue ended" message for guild ${guildId}: ${e.message}`, e); }
     }
     if (!connection && (player || queueData)) {
         player?.stop(true); 
@@ -37,11 +37,11 @@ async function playNextInQueue(guildId, interactionChannel) {
     console.log(`[Queue System ${guildId}] Queue is empty. Nothing to play.`);
     if (queueData.lastInteractionChannel) {
         const emptyEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('La cola está vacía.');
-        queueData.lastInteractionChannel.send({ embeds: [emptyEmbed] }).catch(console.error);
+        try { await queueData.lastInteractionChannel.send({ embeds: [emptyEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "queue empty" message for guild ${guildId}: ${e.message}`, e); }
     }
     queueData.currentTrack = null; 
     if (queueData.nowPlayingMessage) { 
-        queueData.nowPlayingMessage.delete().catch(err => console.warn("Failed to delete NP message on empty queue:", err.message));
+        try { await queueData.nowPlayingMessage.delete(); } catch (e) { console.warn("Failed to delete NP message on empty queue:", e.message); }
         queueData.nowPlayingMessage = null;
     }
     return;
@@ -81,27 +81,27 @@ async function playNextInQueue(guildId, interactionChannel) {
       );
     
     if (queueData.nowPlayingMessage) {
-        try {
-            await queueData.nowPlayingMessage.delete();
-        } catch (err) {
-            console.warn(`[Queue System ${guildId}] Could not delete old now playing message: ${err.message}`);
-        }
+        try { await queueData.nowPlayingMessage.delete(); } catch (err) { console.warn(`[Queue System ${guildId}] Could not delete old now playing message: ${err.message}`); }
     }
     
-    const channelForMessage = trackToPlay.interactionChannel || queueData.lastInteractionChannel || interactionChannel;
+    const channelForMessage = queueData.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
     if (channelForMessage) {
-        const msg = await channelForMessage.send({ embeds: [nowPlayingEmbed], components: [row] }).catch(console.error);
-        queueData.nowPlayingMessage = msg; 
+        try {
+            const msg = await channelForMessage.send({ embeds: [nowPlayingEmbed], components: [row] });
+            if(queueData) queueData.nowPlayingMessage = msg; 
+        } catch (e) {
+            console.error(`[Interaction Error] Failed to send "Now Playing" message for guild ${guildId}: ${e.message}`, e);
+        }
     }
 
   } catch (error) {
     console.error(`[Queue System ${guildId}] Error playing track ${trackToPlay.title}: ${error.message}`, error);
-    const errorChannel = trackToPlay.interactionChannel || queueData.lastInteractionChannel || interactionChannel;
+    const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
     if (errorChannel) {
         const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al reproducir **${trackToPlay.title}**: ${error.message.substring(0,100)}`);
-        errorChannel.send({ embeds: [errorEmbed] }).catch(console.error);
+        try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "error playing track" message for guild ${guildId}: ${e.message}`, e); }
     }
-    queueData.currentTrack = null; 
+    if(queueData) queueData.currentTrack = null; 
     playNextInQueue(guildId, interactionChannel); 
   }
 }
@@ -133,15 +133,19 @@ module.exports = {
         .setDescription('Nombre de la canción o URL (Spotify, YouTube, SoundCloud, Playlist de Spotify)')
         .setRequired(true)),
   async execute(interaction) {
-    if (!interaction.deferred && !interaction.replied) {
-        await interaction.deferReply().catch(console.warn); 
+    try {
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferReply(); 
+        }
+    } catch (e) {
+        console.error(`[Interaction Error] Failed to deferReply for interaction ${interaction.id}: ${e.message}`, e);
+        return; // Cannot proceed if defer fails
     }
 
     const userVoiceChannel = interaction.member.voice.channel;
     if (!userVoiceChannel) {
       const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription('Debes estar en un canal de voz para usar este comando.');
-      if (interaction.deferred || interaction.replied) await interaction.followUp({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
-      else await interaction.reply({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
+      try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (user not in VC): ${e.message}`, e); }
       return;
     }
 
@@ -149,28 +153,27 @@ module.exports = {
     let player = guildPlayers.get(interaction.guild.id); 
     let queueData = guildQueues.get(interaction.guild.id); 
 
-    // Connection Handling Logic
     if (!connection) { 
       console.log(`[Play Command] No existing connection for guild ${interaction.guild.id}. Attempting to join user's channel: ${userVoiceChannel.name}`);
       if (!userVoiceChannel.joinable) {
           const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No tengo permisos para unirme al canal de voz **${userVoiceChannel.name}**.`);
-          if (interaction.deferred || interaction.replied) await interaction.followUp({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
-          else await interaction.reply({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
+          try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (not joinable): ${e.message}`, e); }
           return;
       }
       if (!userVoiceChannel.speakable && userVoiceChannel.type !== ChannelType.GuildStageVoice) {
         const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No tengo permisos para hablar en el canal de voz **${userVoiceChannel.name}**.`);
-        if (interaction.deferred || interaction.replied) await interaction.followUp({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
-        else await interaction.reply({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
+        try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (not speakable): ${e.message}`, e); }
         return;
       }
       try {
+        console.log(`[PLAY - JOIN] Attempting to join voice channel. Guild ID: ${interaction.guild.id}, Channel ID: ${userVoiceChannel.id}`);
         connection = joinVoiceChannel({
           channelId: userVoiceChannel.id,
           guildId: interaction.guild.id,
           adapterCreator: interaction.guild.voiceAdapterCreator,
           selfDeaf: true,
         });
+        console.log(`[PLAY - JOIN] Voice channel joined, awaiting Ready state. Guild ID: ${interaction.guild.id}, Channel ID: ${userVoiceChannel.id}`);
         
         connection.once(VoiceConnectionStatus.Disconnected, async (oldState, newState) => {
             if (newState.status === VoiceConnectionStatus.Disconnected && 
@@ -189,15 +192,14 @@ module.exports = {
         });
 
         await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
-        console.log(`[Play Command] Successfully joined new voice channel: ${userVoiceChannel.name} for guild ${interaction.guild.id}.`);
+        console.log(`[PLAY - JOIN] Voice connection Ready. Guild ID: ${interaction.guild.id}, Channel ID: ${userVoiceChannel.id}`);
       } catch (error) {
-        console.error(`[Play Command] Error joining voice channel ${userVoiceChannel.name} for guild ${interaction.guild.id}: ${error.message}`, error);
+        console.error(`[PLAY - JOIN] Failed to reach Ready state for voice connection. Guild ID: ${interaction.guild.id}, Channel ID: ${userVoiceChannel.id}. Error: ${error.message}`, error);
         if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
             connection.destroy();
         }
         const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No me pude conectar a tu canal de voz (${userVoiceChannel.name}). Verifica mis permisos.`);
-        if (interaction.deferred || interaction.replied) await interaction.followUp({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
-        else await interaction.reply({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
+        try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (join VC error): ${e.message}`, e); }
         return;
       }
     } else { 
@@ -207,34 +209,25 @@ module.exports = {
         const infoEmbed = new EmbedBuilder().setColor(0xFFCC00)
           .setDescription(`Ya estoy en el canal de voz **${currentBotChannel?.name || 'otro canal'}**. La música se reproducirá/añadirá allí.`)
           .setFooter({text: "Si quieres que me una a tu canal, usa /leave primero o el comando /join."});
-        
-        // Check if we can send a followUp or need to edit the initial reply (if it was just deferred)
-        if(interaction.deferred || interaction.replied) {
-            await interaction.followUp({ embeds: [infoEmbed], ephemeral: true }).catch(console.warn);
-        } else {
-            // This case should be rare if we always defer, but as a fallback.
-            await interaction.reply({ embeds: [infoEmbed], ephemeral: true }).catch(console.warn);
-        }
-        // Do not return; allow the command to proceed using the bot's current channel.
+        try { await interaction.followUp({ embeds: [infoEmbed], ephemeral: true }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (bot in other channel): ${e.message}`, e); }
       }
     }
 
-    // Initialize player and queue AFTER connection is confirmed or established
     if (!player) {
       player = createAudioPlayer();
       guildPlayers.set(interaction.guild.id, player);
-      connection.subscribe(player); // Subscribe the new or existing connection
+      connection.subscribe(player); 
 
       if (!guildQueues.has(interaction.guild.id)) {
         guildQueues.set(interaction.guild.id, { tracks: [], lastInteractionChannel: interaction.channel, nowPlayingMessage: null, currentTrack: null });
       }
-      queueData = guildQueues.get(interaction.guild.id); // Ensure queueData is up-to-date
+      queueData = guildQueues.get(interaction.guild.id); 
 
       player.on(AudioPlayerStatus.Idle, () => {
         console.log(`[AudioPlayer ${interaction.guild.id}] Player is idle.`);
         const currentQueueData = guildQueues.get(interaction.guild.id);
         if (currentQueueData?.nowPlayingMessage) { 
-            currentQueueData.nowPlayingMessage.delete().catch(err => console.warn("Failed to delete old NP message on Idle:", err.message));
+            try { currentQueueData.nowPlayingMessage.delete().catch(err => console.warn("Failed to delete old NP message on Idle:", err.message)); } catch(e){}
             currentQueueData.nowPlayingMessage = null;
         }
         playNextInQueue(interaction.guild.id, currentQueueData?.lastInteractionChannel || interaction.channel);
@@ -246,22 +239,12 @@ module.exports = {
         if (currentQueueData) currentQueueData.currentTrack = null;
         const errorChannel = currentQueueData?.lastInteractionChannel || interaction.channel;
         const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Ocurrió un error con el reproductor: ${error.message.substring(0,150)}`);
-        errorChannel.send({ embeds: [errorEmbed] }).catch(console.error);
+        try { errorChannel.send({ embeds: [errorEmbed] }).catch(console.error); } catch(e) { console.error(`[Interaction Error] Failed to send player error message for guild ${interaction.guild.id}: ${e.message}`, e); }
         playNextInQueue(interaction.guild.id, errorChannel);
       });
       
-      // This listener should be attached to the connection object once.
-      // If connection is new, attach it. If connection existed, this listener might already be there.
-      // To prevent multiple listeners, check if this specific handler is already attached or use .once() if appropriate.
-      // For simplicity, the current structure re-adds this on player creation if connection existed.
-      // A better way is to manage connection listeners centrally or ensure they are idempotent.
-      // However, `connection.on` generally adds a new listener each time.
-      // Let's assume this is handled or the impact of multiple identical listeners is minimal for now.
-      // A safer approach if re-subscribing is to clear existing specific listeners first if possible.
-      // For this exercise, we will assume the previous setup with one Destroyed listener per connection is okay.
-      // If connection is new, this is the first time this listener is set for this connection object.
       if (!connection.listeners(VoiceConnectionStatus.Destroyed).some(listener => listener.name === 'playJsDestroyHandler')) {
-        const playJsDestroyHandler = () => { // Give the function a name for potential removal/checking
+        const playJsDestroyHandler = () => { 
             console.log(`[VoiceConnection ${interaction.guild.id}] Connection destroyed (handler in play.js). Cleaning up player and queue.`);
             if (player) {
               player.stop(true);
@@ -269,14 +252,13 @@ module.exports = {
             }
             const qData = guildQueues.get(interaction.guild.id);
             if (qData?.nowPlayingMessage) {
-                qData.nowPlayingMessage.delete().catch(err => console.warn("Failed to delete NP message on Destroy:", err.message));
+                try { qData.nowPlayingMessage.delete().catch(err => console.warn("Failed to delete NP message on Destroy:", err.message)); } catch(e){}
             }
             guildQueues.delete(interaction.guild.id);
         };
         connection.on(VoiceConnectionStatus.Destroyed, playJsDestroyHandler);
       }
     }
-    // Ensure queueData is always fresh, especially if it was initialized inside the !player block
     if (!queueData) { 
         guildQueues.set(interaction.guild.id, { tracks: [], lastInteractionChannel: interaction.channel, nowPlayingMessage: null, currentTrack: null });
         queueData = guildQueues.get(interaction.guild.id);
@@ -289,22 +271,17 @@ module.exports = {
 
     try {
       if (isSpotifyPlaylist) {
-        // If initial reply was deferred and not yet used by an error message or info message:
-        if (interaction.deferred && !interaction.replied) {
-             await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x0099FF).setDescription('Procesando playlist de Spotify... Esto puede tardar un momento.')] });
-        } else if (!interaction.replied) { // Should not happen if we always defer
-             await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x0099FF).setDescription('Procesando playlist de Spotify... Esto puede tardar un momento.')] });
-        }
-        // If already replied (e.g. with "I'm in another channel"), use followup for "Procesando..."
-        else {
-            await interaction.followUp({ embeds: [new EmbedBuilder().setColor(0x0099FF).setDescription('Procesando playlist de Spotify... Esto puede tardar un momento.')], ephemeral: true });
+        try {
+          await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x0099FF).setDescription('Procesando playlist de Spotify... Esto puede tardar un momento.')] });
+        } catch (e) {
+          console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (processing Spotify playlist): ${e.message}`, e);
+          try { await interaction.followUp({ content: 'Procesando playlist de Spotify...', ephemeral: true }); } catch (e2) { console.error(`[Interaction Error] FollowUp also failed for ${interaction.id}: ${e2.message}`, e2); }
         }
         
         const playlist = await playdl.playlist_info(query, { incomplete: true });
         if (!playlist || !playlist.videos || playlist.videos.length === 0) { 
           const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('No se pudo obtener información de la playlist de Spotify o está vacía.');
-          // Use followUp because "Procesando..." was likely sent.
-          await interaction.followUp({ embeds: [errorEmbed], ephemeral: true });
+          try { await interaction.followUp({ embeds: [errorEmbed], ephemeral: true }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (playlist info error): ${e.message}`, e); }
           return;
         }
 
@@ -330,8 +307,7 @@ module.exports = {
             .setThumbnail(playlist.thumbnail?.url || (tracksToAdd.length > 0 ? tracksToAdd[0].thumbnail : null))
             .addFields({ name: 'Pedido por', value: interaction.user.tag, inline: true });
         
-        await interaction.followUp({ embeds: [playlistAddedEmbed] });
-
+        try { await interaction.followUp({ embeds: [playlistAddedEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (playlist added): ${e.message}`, e); }
 
       } else { // Single track logic
         console.log(`[Play Command] Searching for single query: "${query}"`);
@@ -339,8 +315,7 @@ module.exports = {
 
         if (!searchResults || searchResults.length === 0) {
           const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('No se encontraron resultados para tu búsqueda.');
-          if (interaction.deferred || interaction.replied) await interaction.followUp({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
-          else await interaction.reply({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
+          try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (no search results): ${e.message}`, e); }
           return;
         }
 
@@ -368,17 +343,12 @@ module.exports = {
             )
             .setThumbnail(track.thumbnail)
             .setFooter({ text: `Duración: ${track.duration}` });
-            // If initial reply was the "I'm in another channel" followUp, this needs to be a new followUp.
-            // If initial reply was deferred, this should be editReply.
-            if (interaction.replied) await interaction.followUp({ embeds: [queueEmbed] });
-            else await interaction.editReply({ embeds: [queueEmbed] });
-
-        } else {
+            try { await interaction.editReply({ embeds: [queueEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (track added to queue): ${e.message}`, e); }
+        } else { 
             const simpleAddEmbed = new EmbedBuilder()
                 .setColor(0x00FF00)
                 .setDescription(`Añadido a la cola: **${track.title}**. Empezando reproducción...`);
-            if (interaction.replied) await interaction.followUp({ embeds: [simpleAddEmbed] });
-            else await interaction.editReply({ embeds: [simpleAddEmbed] });
+            try { await interaction.editReply({ embeds: [simpleAddEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (starting playback): ${e.message}`, e); }
         }
       }
 
@@ -401,10 +371,19 @@ module.exports = {
         errorEmbed.setDescription('Ocurrió un error inesperado al procesar tu solicitud.');
       }
       
-      if (interaction.replied || interaction.deferred) { 
-         await interaction.followUp({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
-      } else {
-         await interaction.reply({ embeds: [errorEmbed], ephemeral: true }).catch(console.warn);
+      try {
+        if (interaction.replied && !interaction.deferred) { 
+            await interaction.followUp({ embeds: [errorEmbed], ephemeral: true, components: [] });
+        } else { 
+             await interaction.editReply({ embeds: [errorEmbed], components: [] });
+        }
+      } catch (e) {
+          console.error(`[Interaction Error] Failed to send final error message for interaction ${interaction.id}: ${e.message}`, e);
+          try {
+            await interaction.channel.send({ embeds: [errorEmbed], components: [] });
+          } catch (e2) {
+            console.error(`[Interaction Error] Channel.send also failed for interaction ${interaction.id}: ${e2.message}`, e2);
+          }
       }
     }
   },
