@@ -3,13 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Client, Events, GatewayIntentBits, Collection } = require('discord.js');
 const { token } = require('./config.json');
-const { setDebugLogging } = require('@discordjs/voice'); // Import for voice debug logging
 const youtubeNotifier = require('./events/youtubeNotifier.js');
 const { handleMessageForXP, checkAndHandleLevelUp, handleRoleRewards } = require('./features/levelingSystem.js');
-
-// Enable @discordjs/voice debug logging
-setDebugLogging(true);
-console.log('[Main] @discordjs/voice debug logging enabled.');
 
 // Creando una nueva instancia del cliente
 const client = new Client({
@@ -87,12 +82,29 @@ client.on(Events.InteractionCreate, async interaction => {
     try {
       await command.execute(interaction);
     } catch (error) {
-      console.error(`Error ejecutando ${interaction.commandName}:`,error);
-      const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setTitle('Error de Comando').setDescription('¡Ocurrió un error al ejecutar este comando!');
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ embeds: [errorEmbed], ephemeral: true });
-      } else {
-        await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+      console.error(`Error ejecutando ${interaction.commandName}:`, error);
+      
+      // No intentar responder si el error es de interacción desconocida o ya reconocida
+      if (error.code !== 10062 && error.code !== 40060) {
+        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setTitle('Error de Comando').setDescription('¡Ocurrió un error al ejecutar este comando!');
+        
+        try {
+          // Si la interacción está diferida pero no respondida completamente
+          if (!interaction.replied && interaction.deferred) {
+            await interaction.editReply({ embeds: [errorEmbed] });
+          } 
+          // Si la interacción ya ha recibido una respuesta completa
+          else if (interaction.replied) {
+            await interaction.followUp({ embeds: [errorEmbed], ephemeral: true });
+          } 
+          // Si la interacción aún no ha sido reconocida
+          else {
+            await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+          }
+        } catch (followupError) {
+          // Si falla intentando responder, solo registramos el error
+          console.error(`No se pudo enviar respuesta de error para el comando ${interaction.commandName}:`, followupError);
+        }
       }
     }
   } else if (interaction.isButton()) {

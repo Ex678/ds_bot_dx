@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionsBitField } = require('discord.js');
 const { joinVoiceChannel, VoiceConnectionStatus, entersState, getVoiceConnection } = require('@discordjs/voice');
 
 module.exports = {
@@ -12,92 +12,122 @@ module.exports = {
         .addChannelTypes(ChannelType.GuildVoice)
     ),
   async execute(interaction) {
-    await interaction.deferReply({ ephemeral: true }); 
-
-    const targetChannelOption = interaction.options.getChannel('canal');
-    let targetVoiceChannel;
-
-    if (targetChannelOption) {
-      // ChannelType.GuildVoice check is already handled by the slash command option type
-      // but an explicit check here can be a safeguard if types were less strict.
-      // if (targetChannelOption.type !== ChannelType.GuildVoice) {
-      //   const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('El canal seleccionado no es un canal de voz. Por favor, selecciona un canal de voz válido.');
-      //   return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
-      // }
-      targetVoiceChannel = targetChannelOption;
-    } else {
-      targetVoiceChannel = interaction.member.voice.channel;
-    }
-
-    if (!targetVoiceChannel) {
-      const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('No estás en un canal de voz y no has especificado uno. ¡Únete a un canal o especifica uno para que pueda unirme!');
-      try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (no target VC): ${e.message}`, e); }
-      return;
-    }
-
-    // Check if the target channel is actually a voice channel (already ensured by addChannelTypes, but good practice)
-    if (targetVoiceChannel.type !== ChannelType.GuildVoice) {
-        const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('El canal especificado no es un canal de voz válido.');
-        try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (not a voice channel): ${e.message}`, e); }
-        return;
-    }
-
-    const existingConnection = getVoiceConnection(interaction.guild.id);
-    if (existingConnection) {
-      if (existingConnection.joinConfig.channelId === targetVoiceChannel.id) {
-        const infoEmbed = new EmbedBuilder().setColor(0x0099FF).setDescription(`Ya estoy conectado a **${targetVoiceChannel.name}**.`);
-        try { await interaction.editReply({ embeds: [infoEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (already connected to target): ${e.message}`, e); }
-        return;
-      }
-      const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription(`Ya estoy en otro canal de voz en este servidor (${interaction.guild.channels.cache.get(existingConnection.joinConfig.channelId)?.name || 'canal desconocido'}). Usa \`/leave\` primero si quieres que me mueva.`);
-      try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (already connected elsewhere): ${e.message}`, e); }
-      return;
-    }
-    
-    if (!targetVoiceChannel.joinable) {
-        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No tengo permisos para unirme a **${targetVoiceChannel.name}**.`);
-        try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (not joinable): ${e.message}`, e); }
-        return;
-    }
-    if (!targetVoiceChannel.speakable && targetVoiceChannel.type !== ChannelType.GuildStageVoice) { 
-        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No tengo permisos para hablar en **${targetVoiceChannel.name}**.`);
-        try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (not speakable): ${e.message}`, e); }
-        return;
-    }
-
     try {
-      console.log(`[JOIN] Attempting to join voice channel. Guild ID: ${interaction.guild.id}, Channel ID: ${targetVoiceChannel.id}`);
-      const connection = joinVoiceChannel({
-        channelId: targetVoiceChannel.id,
-        guildId: interaction.guild.id,
-        adapterCreator: interaction.guild.voiceAdapterCreator,
-        selfDeaf: true, 
-        selfMute: false
-      });
-      console.log(`[JOIN] Voice channel joined, awaiting Ready state. Guild ID: ${interaction.guild.id}, Channel ID: ${targetVoiceChannel.id}`);
+      await interaction.deferReply({ ephemeral: true }); 
+    
+      const targetChannelOption = interaction.options.getChannel('canal');
+      let targetVoiceChannel;
 
-      connection.on(VoiceConnectionStatus.Disconnected, async (oldState, newState) => {
-        console.warn(`[Voice Connection] Disconnected from ${targetVoiceChannel.name} (Guild: ${interaction.guild.name}). State: ${newState.status}`);
-        // More robust handling could be added here, e.g., attempting reconnects for certain disconnect reasons
-      });
-      
-      connection.on(VoiceConnectionStatus.Destroyed, () => {
-        console.log(`[Voice Connection] Connection explicitly destroyed for ${targetVoiceChannel.name} (Guild: ${interaction.guild.name}). Cleanup should occur via play.js listeners.`);
-      });
-
-      await entersState(connection, VoiceConnectionStatus.Ready, 20_000); 
-      console.log(`[JOIN] Voice connection Ready. Guild ID: ${interaction.guild.id}, Channel ID: ${targetVoiceChannel.id}`);
-      const successEmbed = new EmbedBuilder().setColor(0x00FF00).setDescription(`¡Conectado a **${targetVoiceChannel.name}**!`);
-      try { await interaction.editReply({ embeds: [successEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (join success): ${e.message}`, e); }
-
-    } catch (error) {
-      console.error(`[JOIN] Failed to reach Ready state for voice connection. Guild ID: ${interaction.guild.id}, Channel ID: ${targetVoiceChannel.id}. Error: ${error.message}`, error);
-      const currentConnection = getVoiceConnection(interaction.guild.id);
-      if (currentConnection && currentConnection.state.status !== VoiceConnectionStatus.Destroyed) {
-        currentConnection.destroy();
+      if (targetChannelOption) {
+        targetVoiceChannel = targetChannelOption;
+      } else {
+        targetVoiceChannel = interaction.member.voice.channel;
       }
-      const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No me pude conectar a **${targetVoiceChannel.name}**. Asegúrate de que tengo los permisos correctos y que el canal es accesible.`);
-      try { await interaction.editReply({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (join fail): ${e.message}`, e); }
+
+      if (!targetVoiceChannel) {
+        const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('No estás en un canal de voz y no has especificado uno. ¡Únete a un canal o especifica uno para que pueda unirme!');
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      // Verificación explícita de tipo de canal
+      if (targetVoiceChannel.type !== ChannelType.GuildVoice && targetVoiceChannel.type !== ChannelType.GuildStageVoice) {
+        const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('El canal especificado no es un canal de voz válido.');
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+
+      // Verificar y registrar permisos explícitamente
+      const permissions = targetVoiceChannel.permissionsFor(interaction.client.user);
+      const permissionsInfo = {
+        CONNECT: permissions.has(PermissionsBitField.Flags.Connect),
+        SPEAK: permissions.has(PermissionsBitField.Flags.Speak),
+        VIEW_CHANNEL: permissions.has(PermissionsBitField.Flags.ViewChannel),
+        ADMINISTRATOR: permissions.has(PermissionsBitField.Flags.Administrator)
+      };
+      
+      console.log(`[JOIN] Checking permissions for channel ${targetVoiceChannel.name} (${targetVoiceChannel.id}):`, permissionsInfo);
+
+      // Verificar conexiones existentes
+      const existingConnection = getVoiceConnection(interaction.guild.id);
+      if (existingConnection) {
+        if (existingConnection.joinConfig.channelId === targetVoiceChannel.id) {
+          const infoEmbed = new EmbedBuilder().setColor(0x0099FF).setDescription(`Ya estoy conectado a **${targetVoiceChannel.name}**.`);
+          return await interaction.editReply({ embeds: [infoEmbed] });
+        }
+        
+        console.log(`[JOIN] Destroying existing connection to join a new channel`);
+        existingConnection.destroy();
+        // Pequeña pausa para asegurar que la conexión anterior se haya cerrado correctamente
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      try {
+        console.log(`[JOIN] Attempting to join voice channel ${targetVoiceChannel.name} (${targetVoiceChannel.id})`);
+        
+        // Intentar crear la conexión
+        const connection = joinVoiceChannel({
+          channelId: targetVoiceChannel.id,
+          guildId: interaction.guild.id,
+          adapterCreator: interaction.guild.voiceAdapterCreator,
+          selfDeaf: true,
+          selfMute: false,
+        });
+
+        // Manejar desconexiones
+        connection.on(VoiceConnectionStatus.Disconnected, async () => {
+          try {
+            // Intentar reconectar
+            await Promise.race([
+              entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+              entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+            ]);
+          } catch (error) {
+            // Si falla la reconexión, destruir
+            console.warn(`[JOIN] Failed to reconnect, destroying connection:`, error);
+            connection.destroy();
+          }
+        });
+
+        // Esperar a que la conexión esté lista
+        await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+        console.log(`[JOIN] Successfully connected to ${targetVoiceChannel.name}`);
+        
+        const successEmbed = new EmbedBuilder()
+          .setColor(0x00FF00)
+          .setDescription(`¡Conectado exitosamente a **${targetVoiceChannel.name}**!`);
+        
+        return await interaction.editReply({ embeds: [successEmbed] });
+
+      } catch (error) {
+        console.error(`[JOIN] Failed to join voice channel:`, error);
+        
+        // Limpieza en caso de error
+        const currentConnection = getVoiceConnection(interaction.guild.id);
+        if (currentConnection) {
+          currentConnection.destroy();
+        }
+        
+        const errorEmbed = new EmbedBuilder()
+          .setColor(0xFF0000)
+          .setTitle('Error al conectar')
+          .setDescription(`No pude conectarme a **${targetVoiceChannel.name}**.\nError: ${error.message}`)
+          .setFooter({ text: 'Si el bot tiene permisos de administrador pero sigue fallando, reinicia el bot o el servidor de Discord.' });
+        
+        return await interaction.editReply({ embeds: [errorEmbed] });
+      }
+    } catch (error) {
+      console.error(`[JOIN] Error executing command:`, error);
+      // No intentar responder si el error es de interacción ya reconocida
+      if (error.code !== 40060 && error.code !== 10062) {
+        try {
+          if (!interaction.replied && interaction.deferred) {
+            await interaction.editReply({ content: 'Hubo un error al ejecutar el comando.' });
+          } else if (!interaction.replied) {
+            await interaction.reply({ content: 'Hubo un error al ejecutar el comando.', ephemeral: true });
+          }
+        } catch (e) {
+          console.error('[JOIN] Error sending error response:', e);
+        }
+      }
     }
   },
 };
