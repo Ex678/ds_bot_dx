@@ -1,70 +1,91 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ChannelType } = require('discord.js');
 const { joinVoiceChannel, VoiceConnectionStatus, entersState, getVoiceConnection } = require('@discordjs/voice');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('join')
-    .setDescription('Hace que el bot se una a tu canal de voz.'),
+    .setDescription('Hace que el bot se una a un canal de voz.')
+    .addChannelOption(option =>
+      option.setName('canal')
+        .setDescription('El canal de voz al que unirse (opcional, por defecto tu canal actual)')
+        .setRequired(false)
+        .addChannelTypes(ChannelType.GuildVoice)
+    ),
   async execute(interaction) {
-    const userVoiceChannel = interaction.member.voice.channel;
+    const targetChannelOption = interaction.options.getChannel('canal');
+    let targetVoiceChannel;
 
-    if (!userVoiceChannel) {
-      const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('Debes estar en un canal de voz para usar este comando.');
+    if (targetChannelOption) {
+      // ChannelType.GuildVoice check is already handled by the slash command option type
+      // but an explicit check here can be a safeguard if types were less strict.
+      // if (targetChannelOption.type !== ChannelType.GuildVoice) {
+      //   const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('El canal seleccionado no es un canal de voz. Por favor, selecciona un canal de voz válido.');
+      //   return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+      // }
+      targetVoiceChannel = targetChannelOption;
+    } else {
+      targetVoiceChannel = interaction.member.voice.channel;
+    }
+
+    if (!targetVoiceChannel) {
+      const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('No estás en un canal de voz y no has especificado uno. ¡Únete a un canal o especifica uno para que pueda unirme!');
       return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+    }
+
+    // Check if the target channel is actually a voice channel (already ensured by addChannelTypes, but good practice)
+    if (targetVoiceChannel.type !== ChannelType.GuildVoice) {
+        const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('El canal especificado no es un canal de voz válido.');
+        return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
     }
 
     const existingConnection = getVoiceConnection(interaction.guild.id);
     if (existingConnection) {
-      if (existingConnection.joinConfig.channelId === userVoiceChannel.id) {
-        const infoEmbed = new EmbedBuilder().setColor(0x0099FF).setDescription('Ya estoy conectado a tu canal de voz.');
+      if (existingConnection.joinConfig.channelId === targetVoiceChannel.id) {
+        const infoEmbed = new EmbedBuilder().setColor(0x0099FF).setDescription(`Ya estoy conectado a **${targetVoiceChannel.name}**.`);
         return interaction.reply({ embeds: [infoEmbed], ephemeral: true });
       }
-      const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('Ya estoy en un canal de voz en este servidor. Usa `/leave` primero si quieres que me mueva.');
+      const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription(`Ya estoy en otro canal de voz en este servidor (${interaction.guild.channels.cache.get(existingConnection.joinConfig.channelId)?.name || 'canal desconocido'}). Usa \`/leave\` primero si quieres que me mueva.`);
       return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
     }
     
-    if (!userVoiceChannel.joinable) {
-        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription('No tengo permisos para unirme a tu canal de voz.');
+    if (!targetVoiceChannel.joinable) {
+        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No tengo permisos para unirme a **${targetVoiceChannel.name}**.`);
         return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
     }
-    if (!userVoiceChannel.speakable) { // Though not speaking yet, good to check for future use
-        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription('No tengo permisos para hablar en tu canal de voz.');
+    if (!targetVoiceChannel.speakable && targetVoiceChannel.type !== ChannelType.GuildStageVoice) { 
+        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No tengo permisos para hablar en **${targetVoiceChannel.name}**.`);
         return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
     }
 
     try {
       const connection = joinVoiceChannel({
-        channelId: userVoiceChannel.id,
+        channelId: targetVoiceChannel.id,
         guildId: interaction.guild.id,
         adapterCreator: interaction.guild.voiceAdapterCreator,
-        selfDeaf: true, // Bot mutes itself by default
+        selfDeaf: true, 
         selfMute: false
       });
 
       connection.on(VoiceConnectionStatus.Disconnected, async (oldState, newState) => {
-        console.warn(`[Voice Connection] Disconnected from ${userVoiceChannel.name} (Guild: ${interaction.guild.name}). State: ${newState.status}`);
-        // This event can be triggered for various reasons (kicked, channel deleted, network issues).
-        // A robust handler might try to reconnect or fully destroy the connection and clean up.
-        // For now, we rely on the 'Destroyed' event (often triggered after 'Disconnected') for full cleanup via play.js.
-        // If a more immediate cleanup is needed here, ensure it coordinates with play.js state.
-        // Example: if (newState.status === VoiceConnectionStatus.Disconnected && newState.reason === VoiceConnectionDisconnectReason.WebSocketClose) connection.destroy();
+        console.warn(`[Voice Connection] Disconnected from ${targetVoiceChannel.name} (Guild: ${interaction.guild.name}). State: ${newState.status}`);
+        // More robust handling could be added here, e.g., attempting reconnects for certain disconnect reasons
       });
       
       connection.on(VoiceConnectionStatus.Destroyed, () => {
-        console.log(`[Voice Connection] Connection explicitly destroyed for ${userVoiceChannel.name} (Guild: ${interaction.guild.name}). Cleanup should occur via play.js listeners.`);
+        console.log(`[Voice Connection] Connection explicitly destroyed for ${targetVoiceChannel.name} (Guild: ${interaction.guild.name}). Cleanup should occur via play.js listeners.`);
       });
 
-      await entersState(connection, VoiceConnectionStatus.Ready, 20_000); // Reduced timeout slightly
-      const successEmbed = new EmbedBuilder().setColor(0x00FF00).setDescription(`¡Conectado a **${userVoiceChannel.name}**!`);
+      await entersState(connection, VoiceConnectionStatus.Ready, 20_000); 
+      const successEmbed = new EmbedBuilder().setColor(0x00FF00).setDescription(`¡Conectado a **${targetVoiceChannel.name}**!`);
       await interaction.reply({ embeds: [successEmbed], ephemeral: true });
 
     } catch (error) {
-      console.error(`[Voice Join Error] Could not join ${userVoiceChannel.name}: ${error.message}`, error);
+      console.error(`[Voice Join Error] Could not join ${targetVoiceChannel.name}: ${error.message}`, error);
       const currentConnection = getVoiceConnection(interaction.guild.id);
-      if (currentConnection) {
+      if (currentConnection && currentConnection.state.status !== VoiceConnectionStatus.Destroyed) {
         currentConnection.destroy();
       }
-      const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription('No me pude conectar al canal de voz. Asegúrate de que tengo los permisos correctos y que el canal es accesible.');
+      const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No me pude conectar a **${targetVoiceChannel.name}**. Asegúrate de que tengo los permisos correctos y que el canal es accesible.`);
       await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
     }
   },
