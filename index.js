@@ -13,6 +13,7 @@ const client = new Client({
     GatewayIntentBits.GuildMembers, // Necesario para detectar nuevos miembros
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates
   ],
 });
 
