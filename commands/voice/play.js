@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, MessageFlags } = require('discord.js');
 const { 
   joinVoiceChannel, 
   createAudioPlayer, 
@@ -53,8 +53,8 @@ async function playNextInQueue(guildId, interactionChannel) {
   try {
     // Validate the track URL before attempting to stream
     const validationResult = await playdl.validate(trackToPlay.url);
-    if (!validationResult || (typeof validationResult === 'string' && !['video', 'audio'].includes(validationResult))) { // play-dl might return true/false or stream type
-      console.error(`[Queue System ${guildId}] URL validation failed for "${trackToPlay.title}" (URL: ${trackToPlay.url}). Type: ${typeof validationResult}, Value: ${validationResult}. Skipping track.`);
+    if (validationResult === false) { // Simplified condition based on play-dl documentation for YouTube URLs
+      console.error(`[Queue System ${guildId}] URL validation failed for "${trackToPlay.title}" (URL: ${trackToPlay.url}). playdl.validate() returned: ${validationResult}. Skipping track.`);
       const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
       if (errorChannel) {
         const validationEmbed = new EmbedBuilder()
@@ -244,7 +244,7 @@ module.exports = {
         const infoEmbed = new EmbedBuilder().setColor(0xFFCC00)
           .setDescription(`Ya estoy en el canal de voz **${currentBotChannel?.name || 'otro canal'}**. La música se reproducirá/añadirá allí.`)
           .setFooter({text: "Si quieres que me una a tu canal, usa /leave primero o el comando /join."});
-        try { await interaction.followUp({ embeds: [infoEmbed], ephemeral: true }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (bot in other channel): ${e.message}`, e); }
+        try { await interaction.followUp({ embeds: [infoEmbed], flags: [MessageFlags.Ephemeral] }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (bot in other channel): ${e.message}`, e); }
       }
     }
 
@@ -310,13 +310,13 @@ module.exports = {
           await interaction.editReply({ embeds: [new EmbedBuilder().setColor(0x0099FF).setDescription('Procesando playlist de Spotify... Esto puede tardar un momento.')] });
         } catch (e) {
           console.error(`[Interaction Error] Failed to editReply for interaction ${interaction.id} (processing Spotify playlist): ${e.message}`, e);
-          try { await interaction.followUp({ content: 'Procesando playlist de Spotify...', ephemeral: true }); } catch (e2) { console.error(`[Interaction Error] FollowUp also failed for ${interaction.id}: ${e2.message}`, e2); }
+          try { await interaction.followUp({ content: 'Procesando playlist de Spotify...', flags: [MessageFlags.Ephemeral] }); } catch (e2) { console.error(`[Interaction Error] FollowUp also failed for ${interaction.id}: ${e2.message}`, e2); }
         }
         
         const playlist = await playdl.playlist_info(query, { incomplete: true });
         if (!playlist || !playlist.videos || playlist.videos.length === 0) { 
           const errorEmbed = new EmbedBuilder().setColor(0xFFCC00).setDescription('No se pudo obtener información de la playlist de Spotify o está vacía.');
-          try { await interaction.followUp({ embeds: [errorEmbed], ephemeral: true }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (playlist info error): ${e.message}`, e); }
+          try { await interaction.followUp({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] }); } catch (e) { console.error(`[Interaction Error] Failed to followUp for interaction ${interaction.id} (playlist info error): ${e.message}`, e); }
           return;
         }
 
@@ -408,7 +408,7 @@ module.exports = {
       
       try {
         if (interaction.replied && !interaction.deferred) { 
-            await interaction.followUp({ embeds: [errorEmbed], ephemeral: true, components: [] });
+            await interaction.followUp({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral], components: [] });
         } else { 
              await interaction.editReply({ embeds: [errorEmbed], components: [] });
         }
