@@ -51,7 +51,28 @@ async function playNextInQueue(guildId, interactionChannel) {
   queueData.currentTrack = trackToPlay;
 
   try {
-    console.log(`[Queue System ${guildId}] Attempting to play next track: ${trackToPlay.title}`);
+    // Validate the track URL before attempting to stream
+    const validationResult = await playdl.validate(trackToPlay.url);
+    if (!validationResult || (typeof validationResult === 'string' && !['video', 'audio'].includes(validationResult))) { // play-dl might return true/false or stream type
+      console.error(`[Queue System ${guildId}] URL validation failed for "${trackToPlay.title}" (URL: ${trackToPlay.url}). Type: ${typeof validationResult}, Value: ${validationResult}. Skipping track.`);
+      const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
+      if (errorChannel) {
+        const validationEmbed = new EmbedBuilder()
+          .setColor(0xFFCC00)
+          .setTitle('Error de Reproducción')
+          .setDescription(`No se pudo procesar la canción **${trackToPlay.title}** (URL inválida o no soportada). Saltando a la siguiente.`);
+        try {
+          await errorChannel.send({ embeds: [validationEmbed] });
+        } catch (e) {
+          console.error(`[Interaction Error] Failed to send "validation failed" message for guild ${guildId}: ${e.message}`, e);
+        }
+      }
+      queueData.currentTrack = null; // Clear current track as it's skipped
+      playNextInQueue(guildId, interactionChannel); // Try next song
+      return;
+    }
+
+    console.log(`[Queue System ${guildId}] Attempting to play next track: ${trackToPlay.title} (URL validated)`);
     const stream = await playdl.stream(trackToPlay.url, { quality: 1 });
     const resource = createAudioResource(stream.stream, { 
         inputType: stream.type,
@@ -98,7 +119,21 @@ async function playNextInQueue(guildId, interactionChannel) {
     console.error(`[Queue System ${guildId}] Error playing track ${trackToPlay.title}: ${error.message}`, error);
     const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
     if (errorChannel) {
-        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al reproducir **${trackToPlay.title}**: ${error.message.substring(0,100)}`);
+        let errorMessage = `Error al reproducir **${trackToPlay.title}**: ${error.message.substring(0,100)}`;
+        // Check for specific TypeError related to "Invalid URL"
+        // The original trace mentions "AudioPlayerError [TypeError]: Invalid URL"
+        // play-dl itself might throw a TypeError for invalid URLs before it even gets to AudioPlayer.
+        if ((error.name && error.name.includes('TypeError')) && error.message.includes('Invalid URL')) {
+            errorMessage = `Error al intentar obtener la transmisión de audio para **${trackToPlay.title}**: La URL resultó inválida o no se pudo acceder al contenido.`;
+        } else if (error.message.includes('Sign in to confirm your age')) {
+            errorMessage = `Error al reproducir **${trackToPlay.title}**: El video tiene restricción de edad y requiere inicio de sesión.`;
+        } else if (error.message.includes('private video')) {
+            errorMessage = `Error al reproducir **${trackToPlay.title}**: Este video es privado.`;
+        } else if (error.message.includes('Premiere')) {
+            errorMessage = `Error al reproducir **${trackToPlay.title}**: Este video es un estreno y aún no está disponible.`;
+        }
+
+        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(errorMessage);
         try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "error playing track" message for guild ${guildId}: ${e.message}`, e); }
     }
     if(queueData) queueData.currentTrack = null; 
