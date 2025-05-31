@@ -10,7 +10,7 @@ const {
   StreamType
 } = require('@discordjs/voice');
 const playdl = require('play-dl');
-const ytdl = require('ytdl-core-discord');
+const ytdl = require('ytdl-core');
 
 const guildPlayers = new Map(); // guildId -> AudioPlayer
 const guildQueues = new Map(); // guildId -> { tracks: [], lastInteractionChannel: null, nowPlayingMessage: null, currentTrack: null }
@@ -80,17 +80,17 @@ async function playNextInQueue(guildId, interactionChannel) {
     let streamType = StreamType.Arbitrary; // Default for play-dl
 
     if (trackToPlay.url.includes('youtube.com/') || trackToPlay.url.includes('youtu.be/')) {
-      console.log(`[Queue System ${guildId}] Identified YouTube URL for ${trackToPlay.title}. Attempting to stream with ytdl-core-discord.`);
+      console.log(`[Queue System ${guildId}] Identified YouTube URL for ${trackToPlay.title}. Attempting to stream with ytdl-core.`);
       try {
         streamData = await ytdl(trackToPlay.url, {
           filter: 'audioonly',
           quality: 'highestaudio',
           highWaterMark: 1 << 25,
         });
-        streamType = StreamType.Opus; // ytdl-core-discord provides an Opus stream
-        console.log(`[Queue System ${guildId}] Successfully obtained Opus stream with ytdl-core-discord for: ${trackToPlay.title}`);
+        streamType = StreamType.Arbitrary; // ytdl-core output type can vary, let discordjs/voice infer.
+        console.log(`[Queue System ${guildId}] Successfully obtained stream with ytdl-core for: ${trackToPlay.title}`);
       } catch (ytdlError) {
-        console.error(`[Queue System ${guildId}] Error streaming with ytdl-core-discord for ${trackToPlay.title} (URL: ${trackToPlay.url}): ${ytdlError.message}`, ytdlError);
+        console.error(`[Queue System ${guildId}] Error streaming with ytdl-core for ${trackToPlay.title} (URL: ${trackToPlay.url}): ${ytdlError.message}`, ytdlError);
         const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
         if (errorChannel) {
           const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al procesar la canción de YouTube **${trackToPlay.title}** con ytdl: ${ytdlError.message.substring(0,150)}`);
