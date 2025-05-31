@@ -22,8 +22,8 @@ module.exports = {
     // Unirse al canal
     joinVoiceChannel({
       channelId: channel.id,
-      guildId: interaction.guild.id,
-      adapterCreator: interaction.guild.voiceAdapterCreator,
+      guildId: channel.guild.id,
+      adapterCreator: channel.guild.voiceAdapterCreator,
       selfDeaf: true
     });
 
