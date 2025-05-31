@@ -11,6 +11,74 @@ const {
 } = require('@discordjs/voice');
 const playdl = require('play-dl');
 const ytdl = require('ytdl-core');
+const fs = require('fs');
+const path = require('path');
+
+const MAX_QUEUE_SIZE = 100; // Definir el límite máximo de la cola
+
+// Define y crea el directorio temporal para audio
+const TEMP_AUDIO_DIR = path.join(__dirname, '..', '..', 'temp_audio');
+
+if (!fs.existsSync(TEMP_AUDIO_DIR)) {
+  try {
+    fs.mkdirSync(TEMP_AUDIO_DIR, { recursive: true });
+    console.log(`[File System] Directorio temporal creado en: ${TEMP_AUDIO_DIR}`);
+  } catch (err) {
+    console.error(`[File System] Error al crear directorio temporal ${TEMP_AUDIO_DIR}:`, err);
+    // Considera si el bot debe detenerse o manejar esto de otra forma si no puede crear el dir
+  }
+} else {
+  console.log(`[File System] Directorio temporal ya existe en: ${TEMP_AUDIO_DIR}`);
+}
+
+function extractYouTubeVideoId(url) {
+  try {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.hostname === 'youtu.be') {
+      return parsedUrl.pathname.slice(1).split('?')[0]; // Remove query params like ?si=...
+    }
+    if (parsedUrl.hostname === 'www.youtube.com' || parsedUrl.hostname === 'youtube.com') {
+      if (parsedUrl.pathname === '/watch') {
+        return parsedUrl.searchParams.get('v');
+      }
+      if (parsedUrl.pathname.startsWith('/embed/')) {
+        return parsedUrl.pathname.split('/')[2].split('?')[0];
+      }
+      if (parsedUrl.pathname.startsWith('/v/')) {
+        return parsedUrl.pathname.split('/')[2].split('?')[0];
+      }
+      // Handle shorts e.g. /shorts/VIDEO_ID
+      if (parsedUrl.pathname.startsWith('/shorts/')) {
+        return parsedUrl.pathname.split('/')[2].split('?')[0];
+      }
+    }
+  } catch (e) {
+    console.error('[Util] Error parsing YouTube URL in extractYouTubeVideoId:', e.message);
+  }
+  // Fallback for potentially shortened URLs or non-standard formats if primary parsing fails
+  const patterns = [
+    /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  console.warn(`[Util] Could not extract YouTube video ID from URL: ${url} using any known method.`);
+  return null;
+}
+
+async function cleanupFile(filePath) {
+  if (filePath && fs.existsSync(filePath)) {
+    try {
+      await fs.promises.unlink(filePath);
+      console.log(`[File Cleanup] Archivo temporal borrado: ${filePath}`);
+    } catch (err) {
+      console.error(`[File Cleanup] Error al borrar archivo temporal ${filePath}:`, err);
+    }
+  }
+}
 
 const guildPlayers = new Map(); // guildId -> AudioPlayer
 const guildQueues = new Map(); // guildId -> { tracks: [], lastInteractionChannel: null, nowPlayingMessage: null, currentTrack: null }
@@ -77,24 +145,65 @@ async function playNextInQueue(guildId, interactionChannel) {
     console.log(`[Queue System ${guildId}] Attempting to play next track: ${trackToPlay.title} (URL validated)`);
 
     let streamData; // This will hold the actual readable stream
-    let streamType = StreamType.Arbitrary; // Default for play-dl
+    let streamData; // This will hold the readable stream or file path
+    let streamType = StreamType.Arbitrary; // Default
 
     if (trackToPlay.url.includes('youtube.com/') || trackToPlay.url.includes('youtu.be/')) {
-      console.log(`[Queue System ${guildId}] Identified YouTube URL for ${trackToPlay.title}. Attempting to stream with ytdl-core.`);
-      try {
-        streamData = await ytdl(trackToPlay.url, {
-          filter: 'audioonly',
-          quality: 'highestaudio',
-          highWaterMark: 1 << 25,
-        });
-        streamType = StreamType.Arbitrary; // ytdl-core output type can vary, let discordjs/voice infer.
-        console.log(`[Queue System ${guildId}] Successfully obtained stream with ytdl-core for: ${trackToPlay.title}`);
-      } catch (ytdlError) {
-        console.error(`[Queue System ${guildId}] Error streaming with ytdl-core for ${trackToPlay.title} (URL: ${trackToPlay.url}): ${ytdlError.message}`, ytdlError);
+      console.log(`[Queue System ${guildId}] Identified YouTube URL for ${trackToPlay.title}. Attempting to download with ytdl-core.`);
+
+      const videoId = extractYouTubeVideoId(trackToPlay.url);
+      if (!videoId) {
+        console.error(`[Queue System ${guildId}] Could not extract video ID from YouTube URL: ${trackToPlay.url}`);
         const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
         if (errorChannel) {
-          const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al procesar la canción de YouTube **${trackToPlay.title}** con ytdl: ${ytdlError.message.substring(0,150)}`);
-          try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "ytdl error" message for guild ${guildId}: ${e.message}`, e); }
+            const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No se pudo extraer el ID del video de YouTube para **${trackToPlay.title}**. Saltando.`);
+            try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "extract video ID error" message for guild ${guildId}: ${e.message}`, e); }
+        }
+        if(queueData) queueData.currentTrack = null;
+        playNextInQueue(guildId, interactionChannel);
+        return;
+      }
+
+      const filePath = path.join(TEMP_AUDIO_DIR, `${videoId}.opus`);
+      trackToPlay.filePath = filePath; // Store for potential cleanup
+
+      try {
+        console.log(`[Queue System ${guildId}] Starting download for ${trackToPlay.title} to ${filePath}`);
+        const audioStream = ytdl(trackToPlay.url, {
+          filter: 'audioonly',
+          quality: 'highestaudio',
+        });
+        const writer = fs.createWriteStream(filePath);
+
+        await new Promise((resolve, reject) => {
+          audioStream.on('error', (err) => {
+            writer.destroy(); // Ensure writer is destroyed on audioStream error
+            reject(new Error(`ytdl stream error during download: ${err.message}`));
+          });
+          writer.on('finish', resolve);
+          writer.on('error', (err) => {
+            // audioStream.destroy(); // Optionally destroy audioStream if writer fails.
+            reject(new Error(`File system error during download: ${err.message}`));
+          });
+          audioStream.pipe(writer);
+        });
+
+        console.log(`[Queue System ${guildId}] Successfully downloaded ${trackToPlay.title} to ${filePath}`);
+        streamData = filePath; // streamData is now the file path
+        streamType = StreamType.Arbitrary; // Let @discordjs/voice infer from file path
+                                        // For .opus files, StreamType.OggOpus could be more specific if Arbitrary struggles.
+
+      } catch (downloadError) {
+        console.error(`[Queue System ${guildId}] Error downloading YouTube audio for ${trackToPlay.title} (URL: ${trackToPlay.url}): ${downloadError.message}`, downloadError);
+        if (fs.existsSync(filePath)) {
+          try { fs.unlinkSync(filePath); } catch (e) { console.error(`[File System] Failed to clean up partial download ${filePath}: ${e.message}`); }
+        }
+        trackToPlay.filePath = undefined;
+
+        const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
+        if (errorChannel) {
+          const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al descargar la canción de YouTube **${trackToPlay.title}**: ${downloadError.message.substring(0,100)}`);
+          try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "download error" message for guild ${guildId}: ${e.message}`, e); }
         }
         if(queueData) queueData.currentTrack = null;
         playNextInQueue(guildId, interactionChannel);
@@ -119,7 +228,7 @@ async function playNextInQueue(guildId, interactionChannel) {
         return;
       }
       const pdlStreamObject = await playdl.stream_from_info(videoInfo, { quality: 1 });
-      streamData = pdlStreamObject.stream;
+      streamData = pdlStreamObject.stream; // This is the readable stream
       streamType = pdlStreamObject.type;
     }
 
@@ -307,17 +416,32 @@ module.exports = {
       }
       queueData = guildQueues.get(interaction.guild.id); 
 
-      player.on(AudioPlayerStatus.Idle, () => {
-        console.log(`[AudioPlayer ${interaction.guild.id}] Player is idle.`);
-        const currentQueueData = guildQueues.get(interaction.guild.id);
-        if (currentQueueData?.nowPlayingMessage) { 
-            try { currentQueueData.nowPlayingMessage.delete().catch(err => console.warn("Failed to delete old NP message on Idle:", err.message)); } catch(e){}
-            currentQueueData.nowPlayingMessage = null;
+      player.on(AudioPlayerStatus.Idle, async () => { // Made async
+        const guildId = interaction.guild.id; // or get it from player if possible, or pass it
+        console.log(`[AudioPlayer ${guildId}] Player is idle.`);
+        const currentQueueData = guildQueues.get(guildId); // Use guildId from context
+
+        if (currentQueueData) {
+            const oldTrack = currentQueueData.currentTrack; // Track that just finished
+            if (oldTrack && oldTrack.filePath) {
+                await cleanupFile(oldTrack.filePath);
+                oldTrack.filePath = undefined; // Clear the path from the track object
+            }
+
+            if (currentQueueData.nowPlayingMessage) {
+                try {
+                    await currentQueueData.nowPlayingMessage.delete();
+                } catch(e){
+                    console.warn(`[AudioPlayer ${guildId}] Failed to delete old NP message on Idle: ${e.message}`);
+                }
+                currentQueueData.nowPlayingMessage = null;
+            }
         }
-        playNextInQueue(interaction.guild.id, currentQueueData?.lastInteractionChannel || interaction.channel);
+        // Ensure interaction.channel is available or use a stored channel from queueData
+        playNextInQueue(guildId, currentQueueData?.lastInteractionChannel || interaction.channel);
       });
 
-      player.on('error', error => {
+      player.on('error', async error => { // Made async for consistency if cleanup is added here
         console.error(`[AudioPlayer ${interaction.guild.id}] Error: ${error.message}`, error);
         const currentQueueData = guildQueues.get(interaction.guild.id);
         if (currentQueueData) currentQueueData.currentTrack = null;
@@ -328,17 +452,39 @@ module.exports = {
       });
       
       if (!connection.listeners(VoiceConnectionStatus.Destroyed).some(listener => listener.name === 'playJsDestroyHandler')) {
-        const playJsDestroyHandler = () => { 
-            console.log(`[VoiceConnection ${interaction.guild.id}] Connection destroyed (handler in play.js). Cleaning up player and queue.`);
+        const playJsDestroyHandler = async () => { // Made async
+            const guildId = interaction.guild.id; // or get from connection context if available
+            console.log(`[VoiceConnection ${guildId}] Connection destroyed (handler in play.js). Cleaning up player and queue.`);
+
+            const qData = guildQueues.get(guildId);
+            if (qData) {
+                // Clean up the currently playing track, if any and if downloaded
+                if (qData.currentTrack && qData.currentTrack.filePath) {
+                    await cleanupFile(qData.currentTrack.filePath);
+                    qData.currentTrack.filePath = undefined;
+                }
+                // Clean up any tracks remaining in the queue that might have been downloaded
+                for (const track of qData.tracks) {
+                    if (track.filePath) {
+                        await cleanupFile(track.filePath);
+                        track.filePath = undefined;
+                    }
+                }
+                // Clean up now playing message
+                if (qData.nowPlayingMessage) {
+                    try {
+                        await qData.nowPlayingMessage.delete();
+                    } catch(e) {
+                        console.warn(`[VoiceConnection ${guildId}] Failed to delete NP message on Destroy: ${e.message}`);
+                    }
+                }
+                guildQueues.delete(guildId); // Delete queue data for the guild
+            }
+
             if (player) {
-              player.stop(true);
-              guildPlayers.delete(interaction.guild.id);
+              player.stop(true); // Stop the player
+              guildPlayers.delete(guildId); // Delete player instance for the guild
             }
-            const qData = guildQueues.get(interaction.guild.id);
-            if (qData?.nowPlayingMessage) {
-                try { qData.nowPlayingMessage.delete().catch(err => console.warn("Failed to delete NP message on Destroy:", err.message)); } catch(e){}
-            }
-            guildQueues.delete(interaction.guild.id);
         };
         connection.on(VoiceConnectionStatus.Destroyed, playJsDestroyHandler);
       }
@@ -369,6 +515,16 @@ module.exports = {
           return;
         }
 
+        // Comprobación del límite de la cola para playlists
+        if (queueData.tracks.length + playlist.videos.length > MAX_QUEUE_SIZE) {
+          console.log(`[Queue System ${interaction.guild.id}] Playlist too large for current queue. Current: ${queueData.tracks.length}, Adding: ${playlist.videos.length}, Max: ${MAX_QUEUE_SIZE}`);
+          const playlistTooLargeEmbed = new EmbedBuilder()
+            .setColor(0xFFCC00)
+            .setDescription(`La playlist es demasiado larga para el espacio disponible en la cola (máximo ${MAX_QUEUE_SIZE} canciones en total). No se añadieron canciones de la playlist.`);
+          try { await interaction.followUp({ embeds: [playlistTooLargeEmbed], flags: [MessageFlags.Ephemeral] }); } catch(eMsg) { console.error('[Interaction Error] Failed to send playlist too large message:', eMsg); }
+          return;
+        }
+
         const tracksToAdd = [];
         for (const trackInfo of playlist.videos) { 
             tracksToAdd.push({
@@ -381,7 +537,7 @@ module.exports = {
             });
         }
         
-        queueData.tracks.push(...tracksToAdd);
+        queueData.tracks.push(...tracksToAdd); // tracksToAdd ya está correctamente filtrado o es la lista completa
         console.log(`[Play Command] Added ${tracksToAdd.length} tracks from playlist: ${playlist.name}`);
 
         const playlistAddedEmbed = new EmbedBuilder()
@@ -412,6 +568,22 @@ module.exports = {
           requester: interaction.user.tag,
           interactionChannel: interaction.channel
         };
+
+        // Comprobación del límite de la cola para pistas individuales
+        if (queueData.tracks.length >= MAX_QUEUE_SIZE) {
+          console.log(`[Queue System ${interaction.guild.id}] Queue is full. Max size: ${MAX_QUEUE_SIZE}. Cannot add: ${track.title}`);
+          const queueFullEmbed = new EmbedBuilder()
+            .setColor(0xFFCC00)
+            .setDescription(`La cola está llena (máximo ${MAX_QUEUE_SIZE} canciones). No se pudo añadir **${track.title}**.`);
+          try {
+            // Prefer followUp for additional messages after initial reply/editReply
+            await interaction.followUp({ embeds: [queueFullEmbed], flags: [MessageFlags.Ephemeral] });
+          } catch(eFollowUp) {
+            console.error('[Interaction Error] Failed to send queue full message (followUp):', eFollowUp);
+            // Fallback or further error handling if followUp fails
+          }
+          return;
+        }
         
         queueData.tracks.push(track);
         console.log(`[Play Command] Added to queue: ${track.title}`);
