@@ -6,9 +6,11 @@ const {
   AudioPlayerStatus, 
   VoiceConnectionStatus, 
   getVoiceConnection, 
-  entersState 
+  entersState,
+  StreamType
 } = require('@discordjs/voice');
 const playdl = require('play-dl');
+const ytdl = require('ytdl-core-discord');
 
 const guildPlayers = new Map(); // guildId -> AudioPlayer
 const guildQueues = new Map(); // guildId -> { tracks: [], lastInteractionChannel: null, nowPlayingMessage: null, currentTrack: null }
@@ -74,27 +76,55 @@ async function playNextInQueue(guildId, interactionChannel) {
 
     console.log(`[Queue System ${guildId}] Attempting to play next track: ${trackToPlay.title} (URL validated)`);
 
-    let videoInfo;
-    try {
-      console.log(`[Queue System ${guildId}] Fetching video info for: ${trackToPlay.title} (URL: ${trackToPlay.url})`);
-      videoInfo = await playdl.video_basic_info(trackToPlay.url);
-      console.log(`[Queue System ${guildId}] Successfully fetched video info for: ${trackToPlay.title}`);
-    } catch (infoError) {
-      console.error(`[Queue System ${guildId}] Error fetching video info for ${trackToPlay.title} (URL: ${trackToPlay.url}): ${infoError.message}`, infoError);
-      const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
-      if (errorChannel) {
-        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al obtener información para **${trackToPlay.title}**. Saltando canción.`);
-        try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "error fetching video info" message for guild ${guildId}: ${e.message}`, e); }
+    let streamData; // This will hold the actual readable stream
+    let streamType = StreamType.Arbitrary; // Default for play-dl
+
+    if (trackToPlay.url.includes('youtube.com/') || trackToPlay.url.includes('youtu.be/')) {
+      console.log(`[Queue System ${guildId}] Identified YouTube URL for ${trackToPlay.title}. Attempting to stream with ytdl-core-discord.`);
+      try {
+        streamData = await ytdl(trackToPlay.url, {
+          filter: 'audioonly',
+          quality: 'highestaudio',
+          highWaterMark: 1 << 25,
+        });
+        streamType = StreamType.Opus; // ytdl-core-discord provides an Opus stream
+        console.log(`[Queue System ${guildId}] Successfully obtained Opus stream with ytdl-core-discord for: ${trackToPlay.title}`);
+      } catch (ytdlError) {
+        console.error(`[Queue System ${guildId}] Error streaming with ytdl-core-discord for ${trackToPlay.title} (URL: ${trackToPlay.url}): ${ytdlError.message}`, ytdlError);
+        const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
+        if (errorChannel) {
+          const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al procesar la canción de YouTube **${trackToPlay.title}** con ytdl: ${ytdlError.message.substring(0,150)}`);
+          try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "ytdl error" message for guild ${guildId}: ${e.message}`, e); }
+        }
+        if(queueData) queueData.currentTrack = null;
+        playNextInQueue(guildId, interactionChannel);
+        return;
       }
-      if(queueData) queueData.currentTrack = null;
-      playNextInQueue(guildId, interactionChannel); // Intenta la siguiente canción
-      return;
+    } else {
+      console.log(`[Queue System ${guildId}] Non-YouTube URL detected for ${trackToPlay.title}. Using play-dl.`);
+      let videoInfo;
+      try {
+        console.log(`[Queue System ${guildId}] Fetching video info via play-dl for: ${trackToPlay.title} (URL: ${trackToPlay.url})`);
+        videoInfo = await playdl.video_basic_info(trackToPlay.url);
+        console.log(`[Queue System ${guildId}] Successfully fetched video info via play-dl for: ${trackToPlay.title}`);
+      } catch (infoError) {
+        console.error(`[Queue System ${guildId}] Error fetching video info via play-dl for ${trackToPlay.title} (URL: ${trackToPlay.url}): ${infoError.message}`, infoError);
+        const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
+        if (errorChannel) {
+          const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al obtener información (play-dl) para **${trackToPlay.title}**. Saltando canción.`);
+          try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "play-dl info error" message for guild ${guildId}: ${e.message}`, e); }
+        }
+        if(queueData) queueData.currentTrack = null;
+        playNextInQueue(guildId, interactionChannel);
+        return;
+      }
+      const pdlStreamObject = await playdl.stream_from_info(videoInfo, { quality: 1 });
+      streamData = pdlStreamObject.stream;
+      streamType = pdlStreamObject.type;
     }
 
-    // Ahora obtenemos el stream usando la información obtenida
-    const stream = await playdl.stream_from_info(videoInfo, { quality: 1 });
-    const resource = createAudioResource(stream.stream, { 
-        inputType: stream.type,
+    const resource = createAudioResource(streamData, {
+        inputType: streamType,
         metadata: trackToPlay 
     });
     
