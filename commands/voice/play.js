@@ -73,7 +73,26 @@ async function playNextInQueue(guildId, interactionChannel) {
     }
 
     console.log(`[Queue System ${guildId}] Attempting to play next track: ${trackToPlay.title} (URL validated)`);
-    const stream = await playdl.stream(trackToPlay.url, { quality: 1 });
+
+    let videoInfo;
+    try {
+      console.log(`[Queue System ${guildId}] Fetching video info for: ${trackToPlay.title} (URL: ${trackToPlay.url})`);
+      videoInfo = await playdl.video_basic_info(trackToPlay.url);
+      console.log(`[Queue System ${guildId}] Successfully fetched video info for: ${trackToPlay.title}`);
+    } catch (infoError) {
+      console.error(`[Queue System ${guildId}] Error fetching video info for ${trackToPlay.title} (URL: ${trackToPlay.url}): ${infoError.message}`, infoError);
+      const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
+      if (errorChannel) {
+        const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al obtener información para **${trackToPlay.title}**. Saltando canción.`);
+        try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "error fetching video info" message for guild ${guildId}: ${e.message}`, e); }
+      }
+      if(queueData) queueData.currentTrack = null;
+      playNextInQueue(guildId, interactionChannel); // Intenta la siguiente canción
+      return;
+    }
+
+    // Ahora obtenemos el stream usando la información obtenida
+    const stream = await playdl.stream_from_info(videoInfo, { quality: 1 });
     const resource = createAudioResource(stream.stream, { 
         inputType: stream.type,
         metadata: trackToPlay 
