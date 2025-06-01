@@ -10,7 +10,7 @@ const {
   StreamType
 } = require('@discordjs/voice');
 const playdl = require('play-dl');
-const ytdl = require('ytdl-core');
+const { youtubedl } = require('youtube-dl-exec'); // Changed import
 const fs = require('fs');
 const path = require('path');
 
@@ -149,7 +149,7 @@ async function playNextInQueue(guildId, interactionChannel) {
     let streamType = StreamType.Arbitrary; // Default
 
     if (trackToPlay.url.includes('youtube.com/') || trackToPlay.url.includes('youtu.be/')) {
-      console.log(`[Queue System ${guildId}] Identified YouTube URL for ${trackToPlay.title}. Attempting to download with ytdl-core.`);
+      console.log(`[Queue System ${guildId}] Identified YouTube URL for ${trackToPlay.title}. Attempting to download with yt-dlp via youtube-dl-exec.`);
 
       const videoId = extractYouTubeVideoId(trackToPlay.url);
       if (!videoId) {
@@ -157,53 +157,57 @@ async function playNextInQueue(guildId, interactionChannel) {
         const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
         if (errorChannel) {
             const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`No se pudo extraer el ID del video de YouTube para **${trackToPlay.title}**. Saltando.`);
-            try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "extract video ID error" message for guild ${guildId}: ${e.message}`, e); }
+            try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "extract ID error" message: ${e.message}`, e); }
         }
         if(queueData) queueData.currentTrack = null;
         playNextInQueue(guildId, interactionChannel);
         return;
       }
 
-      const filePath = path.join(TEMP_AUDIO_DIR, `${videoId}.opus`);
-      trackToPlay.filePath = filePath; // Store for potential cleanup
+      const outputTemplate = path.join(TEMP_AUDIO_DIR, `${videoId}.%(ext)s`);
+      const expectedFilePath = path.join(TEMP_AUDIO_DIR, `${videoId}.opus`);
+      trackToPlay.filePath = expectedFilePath; // Set initially for cleanup, may be updated if extension differs
 
       try {
-        console.log(`[Queue System ${guildId}] Starting download for ${trackToPlay.title} to ${filePath}`);
-        const audioStream = ytdl(trackToPlay.url, {
-          filter: 'audioonly',
-          quality: 'highestaudio',
-        });
-        const writer = fs.createWriteStream(filePath);
+        console.log(`[Queue System ${guildId}] Starting download for ${trackToPlay.title} to template ${outputTemplate} using yt-dlp.`);
 
-        await new Promise((resolve, reject) => {
-          audioStream.on('error', (err) => {
-            writer.destroy(); // Ensure writer is destroyed on audioStream error
-            reject(new Error(`ytdl stream error during download: ${err.message}`));
-          });
-          writer.on('finish', resolve);
-          writer.on('error', (err) => {
-            // audioStream.destroy(); // Optionally destroy audioStream if writer fails.
-            reject(new Error(`File system error during download: ${err.message}`));
-          });
-          audioStream.pipe(writer);
+        const ytDlpOutput = await youtubedl(trackToPlay.url, {
+          noCheckCertificates: true,
+          noWarnings: true,
+          extractAudio: true,
+          audioFormat: 'opus',
+          output: outputTemplate,
+          noPlaylist: true,
+          // format: 'bestaudio[ext=opus]/bestaudio', // Could be considered for more robustness
         });
 
-        console.log(`[Queue System ${guildId}] Successfully downloaded ${trackToPlay.title} to ${filePath}`);
-        streamData = filePath; // streamData is now the file path
-        streamType = StreamType.Arbitrary; // Let @discordjs/voice infer from file path
-                                        // For .opus files, StreamType.OggOpus could be more specific if Arbitrary struggles.
+        console.log(`[Queue System ${guildId}] yt-dlp process finished for ${trackToPlay.title}. Stdout:`, ytDlpOutput.stdout || "No stdout");
+
+        if (!fs.existsSync(expectedFilePath)) {
+          const files = fs.readdirSync(TEMP_AUDIO_DIR);
+          const foundFile = files.find(file => file.startsWith(videoId));
+          if (foundFile) {
+              trackToPlay.filePath = path.join(TEMP_AUDIO_DIR, foundFile);
+              console.log(`[Queue System ${guildId}] Actual file found: ${trackToPlay.filePath}`);
+          } else {
+              throw new Error(`Downloaded file ${expectedFilePath} (or variant) not found after yt-dlp execution.`);
+          }
+        }
+
+        console.log(`[Queue System ${guildId}] Successfully prepared ${trackToPlay.title} from ${trackToPlay.filePath} using yt-dlp.`);
+        streamData = trackToPlay.filePath;
+        streamType = StreamType.Arbitrary;
 
       } catch (downloadError) {
-        console.error(`[Queue System ${guildId}] Error downloading YouTube audio for ${trackToPlay.title} (URL: ${trackToPlay.url}): ${downloadError.message}`, downloadError);
-        if (fs.existsSync(filePath)) {
-          try { fs.unlinkSync(filePath); } catch (e) { console.error(`[File System] Failed to clean up partial download ${filePath}: ${e.message}`); }
-        }
+        console.error(`[Queue System ${guildId}] Error downloading with yt-dlp for ${trackToPlay.title} (URL: ${trackToPlay.url}):`, downloadError);
+        await cleanupFile(trackToPlay.filePath);
         trackToPlay.filePath = undefined;
 
         const errorChannel = queueData?.lastInteractionChannel || trackToPlay.interactionChannel || interactionChannel;
         if (errorChannel) {
-          const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al descargar la canción de YouTube **${trackToPlay.title}**: ${downloadError.message.substring(0,100)}`);
-          try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "download error" message for guild ${guildId}: ${e.message}`, e); }
+          const errorMessage = downloadError.stderr || downloadError.message || "Error desconocido de yt-dlp";
+          const errorEmbed = new EmbedBuilder().setColor(0xFF0000).setDescription(`Error al descargar (yt-dlp) para **${trackToPlay.title}**: ${errorMessage.substring(0,150)}`);
+          try { await errorChannel.send({ embeds: [errorEmbed] }); } catch (e) { console.error(`[Interaction Error] Failed to send "yt-dlp download error" message: ${e.message}`, e); }
         }
         if(queueData) queueData.currentTrack = null;
         playNextInQueue(guildId, interactionChannel);
