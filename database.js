@@ -11,7 +11,7 @@ let db = null;
 export async function initializeDatabase() {
     try {
         db = await open({
-            filename: join(__dirname, 'data.sqlite'),
+            filename: join(__dirname, 'bot.db'),
             driver: sqlite3.Database
         });
 
@@ -29,8 +29,8 @@ export async function initializeDatabase() {
                 level INTEGER DEFAULT 0,
                 messages_count INTEGER DEFAULT 0,
                 last_message_timestamp INTEGER DEFAULT 0,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
                 UNIQUE(user_id, guild_id)
             );
 
@@ -40,7 +40,7 @@ export async function initializeDatabase() {
                 guild_id TEXT NOT NULL,
                 role_id TEXT NOT NULL,
                 level_required INTEGER NOT NULL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
                 UNIQUE(guild_id, role_id)
             );
 
@@ -51,15 +51,15 @@ export async function initializeDatabase() {
                 xp_cooldown_seconds INTEGER DEFAULT 60,
                 level_up_channel_id TEXT,
                 level_up_message TEXT DEFAULT '🎉 ¡Felicidades {user}! Has subido al nivel **{level}**!',
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+                created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
             );
 
             -- Trigger para actualizar updated_at en levels
             CREATE TRIGGER IF NOT EXISTS update_levels_timestamp 
             AFTER UPDATE ON levels
             BEGIN
-                UPDATE levels SET updated_at = strftime('%s', 'now')
+                UPDATE levels SET updated_at = (strftime('%s', 'now') * 1000)
                 WHERE id = NEW.id;
             END;
 
@@ -67,7 +67,7 @@ export async function initializeDatabase() {
             CREATE TRIGGER IF NOT EXISTS update_guild_settings_timestamp 
             AFTER UPDATE ON guild_settings
             BEGIN
-                UPDATE guild_settings SET updated_at = strftime('%s', 'now')
+                UPDATE guild_settings SET updated_at = (strftime('%s', 'now') * 1000)
                 WHERE guild_id = NEW.guild_id;
             END;
         `);

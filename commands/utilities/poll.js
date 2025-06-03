@@ -4,6 +4,7 @@ import {
     getPollResults,
     createPollEmbed,
     createPollButtons,
+    registerVote,
     EMOJIS
 } from '../../features/polls/pollSystem.js';
 
@@ -57,6 +58,8 @@ export async function execute(interaction) {
 
         // Crear la encuesta
         const poll = await createPoll({
+            guildId: interaction.guildId,
+            creatorId: interaction.user.id,
             question,
             choices,
             duration,

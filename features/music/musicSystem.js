@@ -288,14 +288,25 @@ async function startPlaying(interaction, guildId) {
             .setFooter({ text: `Usa los controles debajo para gestionar la reproducción ${EMOJIS.VOLUME}` });
 
         const row = createControlButtons(playerData);
-        const message = await interaction.reply({ embeds: [embed], components: [row] });
-        queueData.nowPlayingMessage = message;
+
+        // Solo enviar mensaje si hay una interacción válida
+        if (interaction && !interaction.replied && !interaction.deferred) {
+            const message = await interaction.reply({ embeds: [embed], components: [row] });
+            queueData.nowPlayingMessage = message;
+        } else if (queueData.nowPlayingMessage) {
+            // Si ya hay un mensaje de "now playing", actualizarlo
+            try {
+                await queueData.nowPlayingMessage.edit({ embeds: [embed], components: [row] });
+            } catch (error) {
+                console.error('[Music System] Error al actualizar mensaje:', error);
+            }
+        }
 
         // Configurar eventos del reproductor
         playerData.player.once(AudioPlayerStatus.Idle, () => {
             playerData.isPlaying = false;
             if (queueData.tracks.length > 0) {
-                startPlaying(interaction, guildId);
+                startPlaying(null, guildId);
             }
         });
     } catch (error) {

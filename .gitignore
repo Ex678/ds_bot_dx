@@ -138,3 +138,11 @@ dist
 # Custom configuration files
 config.json
 config.js
+
+# Base de datos
+*.db
+data.sqlite
+
+# Archivos temporales
+temp_audio/
+events/lastVideoId.json
