@@ -137,3 +137,4 @@ dist
 
 # Custom configuration files
 config.json
+config.js
