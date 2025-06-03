@@ -2,9 +2,36 @@ import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { getDatabase, getGuildSettings, getLevelRoles } from '../database.js';
+import { EmbedBuilder } from 'discord.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Constantes para emojis y colores
+const EMOJIS = {
+    LEVEL_UP: '⭐',
+    XP: '✨',
+    MESSAGE: '💬',
+    REWARD: '🎁',
+    LEVEL: '📊',
+    SUCCESS: '✅',
+    ERROR: '❌',
+    CROWN: '👑',
+    SPARKLES: '✨',
+    TROPHY: '🏆',
+    MEDAL: '🎖️',
+    STAR: '⭐',
+    CHART: '📈',
+    NOTES: ['🎯', '🎮', '🎲', '🎪', '🎨', '🎭', '🎪', '🎟️']
+};
+
+const COLORS = {
+    PRIMARY: 0x9B59B6,    // Púrpura para el tema principal
+    SUCCESS: 0x2ECC71,    // Verde para éxitos
+    ERROR: 0xE74C3C,      // Rojo para errores
+    WARNING: 0xF1C40F,    // Amarillo para advertencias
+    SPECIAL: 0x3498DB     // Azul para eventos especiales
+};
 
 // --- XP GAIN CONFIGURATION ---
 // Base XP awarded for each message.
@@ -171,16 +198,40 @@ async function checkAndHandleLevelUp(message, userData) {
         leveledUp = true;
 
         const guildSettings = await getGuildSettings(message.guild.id);
-        const levelUpMessage = guildSettings.level_up_message
-            .replace('{user}', message.author)
-            .replace('{level}', userData.level);
+        const randomEmoji = EMOJIS.NOTES[Math.floor(Math.random() * EMOJIS.NOTES.length)];
+        
+        // Crear un embed atractivo para la subida de nivel
+        const embed = new EmbedBuilder()
+            .setColor(COLORS.SPECIAL)
+            .setTitle(`${EMOJIS.LEVEL_UP} ¡Nivel Alcanzado! ${randomEmoji}`)
+            .setDescription(guildSettings.level_up_message
+                .replace('{user}', message.author)
+                .replace('{level}', userData.level))
+            .addFields(
+                { 
+                    name: `${EMOJIS.XP} Experiencia Total`,
+                    value: `${userData.xp} XP`,
+                    inline: true
+                },
+                {
+                    name: `${EMOJIS.MESSAGE} Mensajes Totales`,
+                    value: `${userData.messages_count}`,
+                    inline: true
+                }
+            )
+            .setThumbnail(message.author.displayAvatarURL())
+            .setTimestamp()
+            .setFooter({ 
+                text: `¡Sigue así! Siguiente nivel en ${getXpNeededForLevel(currentLevel + 1) - userData.xp} XP`,
+                iconURL: message.guild.iconURL()
+            });
 
         try {
             const channel = guildSettings.level_up_channel_id
                 ? await message.guild.channels.fetch(guildSettings.level_up_channel_id)
                 : message.channel;
 
-            await channel.send(levelUpMessage);
+            await channel.send({ embeds: [embed] });
         } catch (error) {
             console.error(`[Leveling System] Error al enviar mensaje de nivel:`, error);
         }
@@ -229,10 +280,32 @@ async function handleRoleRewards(member, userData) {
                 await member.roles.add(role);
                 console.log(`[Role Rewards] ${member.user.tag} recibió el rol "${role.name}"`);
 
+                // Crear embed para la recompensa de rol
+                const rewardEmbed = new EmbedBuilder()
+                    .setColor(COLORS.SUCCESS)
+                    .setTitle(`${EMOJIS.REWARD} ¡Nueva Recompensa Desbloqueada!`)
+                    .setDescription(`¡Felicidades! Has alcanzado el nivel ${reward.level_required} y has desbloqueado un nuevo rol.`)
+                    .addFields(
+                        { 
+                            name: `${EMOJIS.TROPHY} Rol Obtenido`,
+                            value: `${role.name}`,
+                            inline: true
+                        },
+                        {
+                            name: `${EMOJIS.LEVEL} Nivel Requerido`,
+                            value: `${reward.level_required}`,
+                            inline: true
+                        }
+                    )
+                    .setThumbnail(member.user.displayAvatarURL())
+                    .setTimestamp()
+                    .setFooter({ 
+                        text: `¡Sigue participando para desbloquear más recompensas!`,
+                        iconURL: member.guild.iconURL()
+                    });
+
                 try {
-                    await member.send(
-                        `¡Felicidades! Has alcanzado el nivel ${reward.level_required} y se te ha otorgado el rol **${role.name}** en ${member.guild.name}.`
-                    );
+                    await member.send({ embeds: [rewardEmbed] });
                 } catch (dmError) {
                     console.log(`[Role Rewards] No se pudo enviar DM a ${member.user.tag}`);
                 }
