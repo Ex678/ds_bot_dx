@@ -65,27 +65,33 @@ for (const folder of commandFolders) {
     }
 }
 
-// Manejar comandos slash
+// Manejar comandos slash e interacciones de botones
 client.on(Events.InteractionCreate, async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-
-    const command = client.commands.get(interaction.commandName);
-
-    if (!command) {
-        console.error(`Comando ${interaction.commandName} no encontrado.`);
-        return interaction.reply({
-            content: '❌ ¡Comando no encontrado!',
-            ephemeral: true
-        });
-    }
-
     try {
-        await command.execute(interaction);
+        if (interaction.isChatInputCommand()) {
+            const command = client.commands.get(interaction.commandName);
+
+            if (!command) {
+                console.error(`Comando ${interaction.commandName} no encontrado.`);
+                return interaction.reply({
+                    content: '❌ ¡Comando no encontrado!',
+                    ephemeral: true
+                });
+            }
+
+            await command.execute(interaction);
+        } else if (interaction.isButton()) {
+            // Manejar botones de música
+            if (interaction.customId.startsWith('music_')) {
+                const { handleButton } = await import('./features/music/musicSystem.js');
+                await handleButton(interaction);
+            }
+        }
     } catch (error) {
-        console.error(`Error ejecutando ${interaction.commandName}:`, error);
+        console.error(`Error manejando interacción:`, error);
         
         const errorMessage = {
-            content: '❌ ¡Hubo un error al ejecutar este comando!',
+            content: '❌ ¡Hubo un error al procesar la interacción!',
             ephemeral: true
         };
 
@@ -98,7 +104,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.reply(errorMessage);
             }
         } catch (followupError) {
-            console.error(`No se pudo enviar respuesta de error para ${interaction.commandName}:`, followupError);
+            console.error(`No se pudo enviar respuesta de error:`, followupError);
         }
     }
 });

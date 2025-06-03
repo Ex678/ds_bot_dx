@@ -1,7 +1,7 @@
 {
   "name": "ds_bot_dx",
   "version": "1.0.0",
-  "description": "Bot de Discord con sistema de niveles y moderación",
+  "description": "Bot de Discord con sistema de niveles, moderación y música",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -13,18 +13,24 @@
     "discord",
     "bot",
     "levels",
-    "moderation"
+    "moderation",
+    "music"
   ],
   "author": "Ex678",
   "license": "MIT",
   "dependencies": {
     "@discordjs/voice": "^0.17.0",
+    "@distube/ytdl-core": "^4.13.7",
     "axios": "^1.9.0",
     "discord.js": "^14.14.1",
     "express": "^4.18.2",
+    "ffmpeg-static": "^5.2.0",
+    "libsodium-wrappers": "^0.7.14",
+    "opusscript": "^0.1.1",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7",
-    "xml2js": "^0.6.2"
+    "xml2js": "^0.6.2",
+    "youtube-search-without-api-key": "^2.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
