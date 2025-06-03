@@ -1,75 +1,52 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
+import { SlashCommandBuilder, PermissionsBitField } from 'discord.js';
 
-module.exports = {
-  data: new SlashCommandBuilder()
+export const data = new SlashCommandBuilder()
     .setName('unmute')
-    .setDescription('Quita el silencio a un usuario.')
+    .setDescription('Remueve el silencio de un usuario')
     .addUserOption(option =>
-      option.setName('usuario')
-        .setDescription('El usuario a quien quitar el silencio.')
-        .setRequired(true))
-    .addStringOption(option =>
-      option.setName('razon')
-        .setDescription('Razón para quitar el silencio.')
-        .setRequired(false)),
+        option.setName('usuario')
+            .setDescription('El usuario a quien remover el silencio')
+            .setRequired(true));
 
-  async execute(interaction) {
-    // 1. Permission Check
+export async function execute(interaction) {
+    // Verificar permisos
     if (!interaction.member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
-      const permEmbed = new EmbedBuilder()
-        .setTitle('❌ Permiso Denegado')
-        .setDescription('No tenés permiso para quitar silencios.')
-        .setColor(0xFF0000) // Red
-        .setTimestamp();
-      return interaction.reply({ embeds: [permEmbed], ephemeral: true });
+        return interaction.reply({
+            content: '❌ No tienes permisos para gestionar usuarios.',
+            ephemeral: true
+        });
     }
 
-    const targetMember = interaction.options.getMember('usuario');
-    const reason = interaction.options.getString('razon') || 'Sin razón especificada';
+    const usuario = interaction.options.getUser('usuario');
+    const miembro = await interaction.guild.members.fetch(usuario.id);
 
-    // 2. Target Exists Check
-    if (!targetMember) {
-      const noMemberEmbed = new EmbedBuilder()
-        .setTitle('❌ Usuario no Encontrado')
-        .setDescription('No pude encontrar al usuario especificado.')
-        .setColor(0xFF0000) // Red
-        .setTimestamp();
-      return interaction.reply({ embeds: [noMemberEmbed], ephemeral: true });
+    // Verificar si el bot puede gestionar al usuario
+    if (!miembro.moderatable) {
+        return interaction.reply({
+            content: '❌ No puedo gestionar a este usuario. Puede que tenga un rol más alto que el mío.',
+            ephemeral: true
+        });
     }
 
-    // 3. Is Muted Check
-    if (!targetMember.isCommunicationDisabled()) {
-      const notMutedEmbed = new EmbedBuilder()
-        .setTitle('🔊 Usuario No Silenciado')
-        .setDescription('Este usuario no está silenciado.')
-        .setColor(0x0099FF) // Blue for informational
-        .setTimestamp();
-      return interaction.reply({ embeds: [notMutedEmbed], ephemeral: true });
-    }
-
-    // 4. Unmute Operation
     try {
-      await targetMember.timeout(null, reason); // Setting duration to null removes timeout
+        // Remover el timeout (establecerlo a null)
+        await miembro.timeout(null);
+        await interaction.reply(`✅ Se ha removido el silencio de ${usuario.tag}.`);
 
-      const successEmbed = new EmbedBuilder()
-        .setTitle('🔊 Usuario Desilenciado')
-        .addFields(
-          { name: 'Usuario', value: targetMember.user.tag, inline: true },
-          { name: 'Razón', value: reason, inline: false }
-        )
-        .setColor(0x00FF00) // Green
-        .setThumbnail(targetMember.user.displayAvatarURL())
-        .setTimestamp();
-      await interaction.reply({ embeds: [successEmbed] });
-
+        // Intentar notificar al usuario
+        try {
+            await usuario.send(`Se te ha removido el silencio en ${interaction.guild.name}.`);
+        } catch (dmError) {
+            await interaction.followUp({
+                content: '⚠️ No se pudo enviar un mensaje privado al usuario.',
+                ephemeral: true
+            });
+        }
     } catch (error) {
-      console.error('Error al quitar el silencio al usuario:', error);
-      const errorEmbed = new EmbedBuilder()
-        .setTitle('❌ Error al Quitar Silencio')
-        .setDescription('Hubo un error al intentar quitar el silencio al usuario. Revisa mis permisos.')
-        .setColor(0xFF0000) // Red
-        .setTimestamp();
-      await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+        console.error('Error al remover el silencio:', error);
+        await interaction.reply({
+            content: '❌ No se pudo remover el silencio del usuario.',
+            ephemeral: true
+        });
     }
-  },
-};
+}

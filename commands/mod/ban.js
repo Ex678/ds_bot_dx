@@ -1,49 +1,56 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField } = require('discord.js');
+import { SlashCommandBuilder, PermissionsBitField } from 'discord.js';
 
-module.exports = {
-  data: new SlashCommandBuilder()
+export const data = new SlashCommandBuilder()
     .setName('ban')
-    .setDescription('Banea a un usuario del servidor.')
+    .setDescription('Banea a un usuario del servidor')
     .addUserOption(option =>
-      option.setName('usuario')
-        .setDescription('El usuario a banear')
-        .setRequired(true))
+        option.setName('usuario')
+            .setDescription('El usuario a banear')
+            .setRequired(true))
     .addStringOption(option =>
-      option.setName('razon')
-        .setDescription('Razón del baneo')
-        .setRequired(false)),
+        option.setName('razon')
+            .setDescription('Razón del baneo')
+            .setRequired(true));
 
-  async execute(interaction) {
-    const member = interaction.options.getMember('usuario');
-    const reason = interaction.options.getString('razon') || 'Sin razón especificada';
-
+export async function execute(interaction) {
+    // Verificar permisos
     if (!interaction.member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
-      return interaction.reply({
-        content: '❌ No tenés permiso para banear.',
-        flags: 64
-      });
+        return interaction.reply({
+            content: '❌ No tienes permisos para banear usuarios.',
+            ephemeral: true
+        });
     }
 
-    if (!member.bannable) {
-      return interaction.reply({
-        content: '❌ No puedo banear a ese usuario.',
-        flags: 64
-      });
+    const usuario = interaction.options.getUser('usuario');
+    const razon = interaction.options.getString('razon');
+
+    // No permitir auto-baneo
+    if (usuario.id === interaction.user.id) {
+        return interaction.reply({
+            content: '❌ No puedes banearte a ti mismo.',
+            ephemeral: true
+        });
     }
 
-    await member.ban({ reason });
+    try {
+        await interaction.guild.members.ban(usuario, { reason: razon });
+        await interaction.reply(`✅ Usuario ${usuario.tag} ha sido baneado.\nRazón: ${razon}`);
 
-    const embed = new EmbedBuilder()
-      .setColor(0x8B0000)
-      .setTitle('🔨 Usuario Baneado')
-      .addFields(
-        { name: 'Usuario', value: `${member.user.tag}`, inline: true },
-        { name: 'Razón', value: reason, inline: true }
-      )
-      .setThumbnail(member.user.displayAvatarURL())
-      .setTimestamp();
-
-    await interaction.reply({ embeds: [embed] });
-  }
-};
+        // Intentar notificar al usuario
+        try {
+            await usuario.send(`Has sido baneado de ${interaction.guild.name}\nRazón: ${razon}`);
+        } catch (dmError) {
+            await interaction.followUp({
+                content: '⚠️ No se pudo enviar un mensaje privado al usuario.',
+                ephemeral: true
+            });
+        }
+    } catch (error) {
+        console.error('Error al banear:', error);
+        await interaction.reply({
+            content: '❌ No se pudo banear al usuario.',
+            ephemeral: true
+        });
+    }
+}
 

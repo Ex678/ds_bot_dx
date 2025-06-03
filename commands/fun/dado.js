@@ -1,25 +1,21 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 
-module.exports = {
-  data: new SlashCommandBuilder()
+export const data = new SlashCommandBuilder()
     .setName('dado')
-    .setDescription('Lanza un dado.')
+    .setDescription('Tira un dado')
     .addIntegerOption(option =>
-      option.setName('caras')
-        .setDescription('Número de caras del dado (defecto: 6)')
-        .setRequired(false)), // Optional, so false
-  async execute(interaction) {
-    const caras = interaction.options.getInteger('caras') || 6; // Default to 6 if not provided
+        option.setName('caras')
+            .setDescription('Número de caras del dado')
+            .setRequired(false));
+
+export async function execute(interaction) {
+    const caras = interaction.options.getInteger('caras') || 6;
     const resultado = Math.floor(Math.random() * caras) + 1;
 
     const embed = new EmbedBuilder()
-      .setTitle('🎲 Tirada de Dado')
-      .addFields(
-        { name: 'Lanzamiento', value: `Un dado de ${caras} caras`, inline: true },
-        { name: 'Resultado', value: `${resultado}`, inline: true }
-      )
-      .setColor(0x00FF00); // A green color
+        .setColor('#0099ff')
+        .setTitle('🎲 Resultado del dado')
+        .setDescription(`Has sacado un ${resultado} en un dado de ${caras} caras`);
 
     await interaction.reply({ embeds: [embed] });
-  },
-};
+}

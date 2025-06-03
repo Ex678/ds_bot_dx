@@ -1,25 +1,31 @@
-const { Events, EmbedBuilder } = require('discord.js');
+import { Events, EmbedBuilder } from 'discord.js';
 
-module.exports = {
-  name: Events.GuildMemberAdd,
-  once: false,
-  execute(member) {
-    // Cambiá este ID por el canal de bienvenida que vos quieras
+export const name = Events.GuildMemberAdd;
+export const once = false;
+
+export async function execute(member) {
+    // Canal de bienvenida
     const canalBienvenidaId = '1177423543831629864';
     const canalBienvenida = member.guild.channels.cache.get(canalBienvenidaId);
 
-    if (!canalBienvenida) return;
+    if (!canalBienvenida) {
+        console.error('Canal de bienvenida no encontrado');
+        return;
+    }
 
-    const embed = new EmbedBuilder()
-      .setColor(0x00BFFF)
-      .setTitle('🎉 ¡Nuevo miembro se ha unido!')
-      .setDescription(`Bienvenido/a al servidor, ${member}! 🥳\nLeé las <#912889677806178345> y pasala genial.`)
-      .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-      .setImage('https://static.wikia.nocookie.net/esgta/images/8/8b/Calamardo_guapo_8_bits.gif') // Podés cambiar esta imagen
-      .setFooter({ text: `Usuario ID: ${member.id}` })
-      .setTimestamp();
+    try {
+        const embed = new EmbedBuilder()
+            .setColor(0x00BFFF)
+            .setTitle('🎉 ¡Nuevo miembro se ha unido!')
+            .setDescription(`Bienvenido/a al servidor, ${member}! 🥳\nLeé las <#912889677806178345> y pasala genial.`)
+            .setThumbnail(member.user.displayAvatarURL())
+            .setImage('https://static.wikia.nocookie.net/esgta/images/8/8b/Calamardo_guapo_8_bits.gif')
+            .setFooter({ text: `Usuario ID: ${member.id}` })
+            .setTimestamp();
 
-    canalBienvenida.send({ embeds: [embed] });
-  }
-};
+        await canalBienvenida.send({ embeds: [embed] });
+    } catch (error) {
+        console.error('Error al enviar mensaje de bienvenida:', error);
+    }
+}
 

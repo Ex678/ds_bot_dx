@@ -1,28 +1,32 @@
 {
-  "name": "ds-bot",
-  "version": "0.0.1",
-  "description": "ds-bot for deivid",
-  "license": "GPL-3.0-or-later",
-  "author": "Ex678",
-  "type": "commonjs",
+  "name": "ds_bot_dx",
+  "version": "1.0.0",
+  "description": "Bot de Discord con sistema de niveles y moderación",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "deploy": "node deploy-commands.js"
   },
+  "keywords": [
+    "discord",
+    "bot",
+    "levels",
+    "moderation"
+  ],
+  "author": "Ex678",
+  "license": "MIT",
   "dependencies": {
     "@discordjs/voice": "^0.17.0",
     "axios": "^1.9.0",
-    "canvas": "^2.11.2",
-    "discord.js": "^14.19.3",
-    "express": "^5.1.0",
-    "ffmpeg-static": "^5.2.0",
-    "googleapis": "^149.0.0",
-    "libsodium-wrappers": "^0.7.13",
-    "openai": "^4.98.0",
-    "opusscript": "^0.1.1",
-    "play-dl": "^1.9.7",
-    "spotify-web-api-node": "^5.0.2",
-    "xml2js": "^0.6.2",
-    "youtube-dl-exec": "^3.0.22"
+    "discord.js": "^14.14.1",
+    "express": "^4.18.2",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
   }
 }

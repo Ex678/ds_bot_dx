@@ -1,41 +1,38 @@
-const { SlashCommandBuilder, PermissionsBitField, EmbedBuilder } = require('discord.js');
+import { SlashCommandBuilder, PermissionsBitField } from 'discord.js';
 
-module.exports = {
-  data: new SlashCommandBuilder()
+export const data = new SlashCommandBuilder()
     .setName('clear')
-    .setDescription('Elimina mensajes de un canal.')
+    .setDescription('Elimina un número específico de mensajes')
     .addIntegerOption(option =>
-      option.setName('cantidad')
-        .setDescription('Cantidad de mensajes a eliminar (máx. 100)')
-        .setRequired(true)),
+        option.setName('cantidad')
+            .setDescription('Número de mensajes a eliminar (1-100)')
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(100));
 
-  async execute(interaction) {
+export async function execute(interaction) {
+    // Verificar permisos
+    if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+        return interaction.reply({
+            content: '❌ No tienes permisos para eliminar mensajes.',
+            ephemeral: true
+        });
+    }
+
     const cantidad = interaction.options.getInteger('cantidad');
 
-    if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-      return interaction.reply({
-        content: '❌ No tenés permiso para borrar mensajes.',
-        flags: 64
-      });
+    try {
+        const mensajesBorrados = await interaction.channel.bulkDelete(cantidad, true);
+        await interaction.reply({
+            content: `✅ Se han eliminado ${mensajesBorrados.size} mensajes.`,
+            ephemeral: true
+        });
+    } catch (error) {
+        console.error('Error al eliminar mensajes:', error);
+        await interaction.reply({
+            content: '❌ No se pudieron eliminar los mensajes. Asegúrate de que no sean más antiguos de 14 días.',
+            ephemeral: true
+        });
     }
-
-    if (cantidad < 1 || cantidad > 100) {
-      return interaction.reply({
-        content: '❌ Solo podés borrar entre 1 y 100 mensajes.',
-        flags: 64
-      });
-    }
-
-    const { size } = await interaction.channel.bulkDelete(cantidad, true);
-
-    const embed = new EmbedBuilder()
-      .setColor(0x7289DA)
-      .setTitle('🧹 Mensajes Borrados')
-      .setDescription(`Se borraron **${size}** mensajes.`)
-      .setTimestamp()
-      .setFooter({ text: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() });
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
-  }
-};
+}
 

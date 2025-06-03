@@ -1,61 +1,55 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionsBitField, ChannelType } = require('discord.js');
+import { SlashCommandBuilder, EmbedBuilder, PermissionsBitField, ChannelType } from 'discord.js';
 
-module.exports = {
-  data: new SlashCommandBuilder()
+export const data = new SlashCommandBuilder()
     .setName('anunciar')
-    .setDescription('Envía un anuncio a un canal específico o al actual.')
+    .setDescription('Envía un anuncio a un canal específico o al actual')
     .addStringOption(option =>
-      option.setName('mensaje')
-        .setDescription('El mensaje del anuncio.')
-        .setRequired(true))
+        option.setName('mensaje')
+            .setDescription('El mensaje del anuncio')
+            .setRequired(true))
     .addChannelOption(option =>
-      option.setName('canal')
-        .setDescription('El canal donde enviar el anuncio.')
-        .addChannelTypes(ChannelType.GuildText) // Only allow text channels
-        .setRequired(false)),
+        option.setName('canal')
+            .setDescription('El canal donde enviar el anuncio')
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(false));
 
-  async execute(interaction) {
-    // 1. Permission Check
+export async function execute(interaction) {
+    // Verificar permisos
     if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-      const permEmbed = new EmbedBuilder()
-        .setTitle('❌ Permiso Denegado')
-        .setDescription('No tenés permiso para enviar anuncios.')
-        .setColor(0xFF0000) // Red
-        .setTimestamp();
-      return interaction.reply({ embeds: [permEmbed], ephemeral: true });
+        return interaction.reply({
+            content: '❌ No tienes permisos para enviar anuncios.',
+            ephemeral: true
+        });
     }
 
     const mensaje = interaction.options.getString('mensaje');
     const targetChannelOption = interaction.options.getChannel('canal');
     const targetChannel = targetChannelOption || interaction.channel;
 
-    // 2. Create Announcement Embed
+    // Crear embed del anuncio
     const announcementEmbed = new EmbedBuilder()
-      .setTitle('📢 Anuncio')
-      .setDescription(mensaje)
-      .setColor(0xFFD700) // Gold color for announcement
-      .setFooter({ text: `Anunciado por: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
-      .setTimestamp();
+        .setColor(0xFFD700)
+        .setTitle('📢 Anuncio')
+        .setDescription(mensaje)
+        .setFooter({ 
+            text: `Anunciado por: ${interaction.user.tag}`, 
+            iconURL: interaction.user.displayAvatarURL() 
+        })
+        .setTimestamp();
 
-    // 3. Send Announcement and Handle Errors
     try {
-      await targetChannel.send({ embeds: [announcementEmbed] });
-
-      const successEmbed = new EmbedBuilder()
-        .setTitle('✅ Anuncio Enviado')
-        .setDescription(`Anuncio enviado correctamente al canal ${targetChannel}.`)
-        .setColor(0x00FF00) // Green
-        .setTimestamp();
-      await interaction.reply({ embeds: [successEmbed], ephemeral: true });
-
+        // Enviar el anuncio
+        await targetChannel.send({ embeds: [announcementEmbed] });
+        
+        await interaction.reply({
+            content: `✅ Anuncio enviado correctamente al canal ${targetChannel}.`,
+            ephemeral: true
+        });
     } catch (error) {
-      console.error('Error al enviar el anuncio:', error);
-      const errorEmbed = new EmbedBuilder()
-        .setTitle('❌ Error al Enviar')
-        .setDescription(`No se pudo enviar el anuncio al canal ${targetChannel}. Verifica mis permisos en ese canal.`)
-        .setColor(0xFF0000) // Red
-        .setTimestamp();
-      await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+        console.error('Error al enviar el anuncio:', error);
+        await interaction.reply({
+            content: `❌ No se pudo enviar el anuncio al canal ${targetChannel}. Verifica mis permisos en ese canal.`,
+            ephemeral: true
+        });
     }
-  },
-};
+}
