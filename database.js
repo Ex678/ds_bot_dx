@@ -73,6 +73,7 @@ export async function initializeDatabase() {
             CREATE TABLE IF NOT EXISTS filtered_words (
                 guild_id TEXT,
                 word TEXT,
+                severity INTEGER DEFAULT 1,
                 rule_type TEXT DEFAULT 'block',
                 created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
                 PRIMARY KEY (guild_id, word)

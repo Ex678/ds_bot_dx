@@ -97,7 +97,7 @@ export async function execute(interaction) {
                             description: 'El formato JSON proporcionado no es válido.',
                             color: 0xFF0000
                         })],
-                        ephemeral: true
+                        flags: ['Ephemeral']
                     });
                     return;
                 }
@@ -126,7 +126,7 @@ export async function execute(interaction) {
                         description: `La regla de tipo ${type} ha sido ${existingRule ? 'actualizada' : 'creada'} correctamente.`,
                         color: 0x00FF00
                     })],
-                    ephemeral: true
+                    flags: ['Ephemeral']
                 });
                 break;
             }
@@ -148,7 +148,7 @@ export async function execute(interaction) {
                             description: `La palabra "${word}" ha sido añadida al filtro con severidad ${severity}.`,
                             color: 0x00FF00
                         })],
-                        ephemeral: true
+                        flags: ['Ephemeral']
                     });
                 } else {
                     await db.run(
@@ -162,7 +162,7 @@ export async function execute(interaction) {
                             description: `La palabra "${word}" ha sido eliminada del filtro.`,
                             color: 0x00FF00
                         })],
-                        ephemeral: true
+                        flags: ['Ephemeral']
                     });
                 }
                 break;
@@ -206,7 +206,7 @@ export async function execute(interaction) {
                             }
                         ]
                     })],
-                    ephemeral: true
+                    flags: ['Ephemeral']
                 });
                 break;
             }
@@ -226,7 +226,7 @@ export async function execute(interaction) {
                             description: `No existe una regla de tipo ${type}.`,
                             color: 0xFF0000
                         })],
-                        ephemeral: true
+                        flags: ['Ephemeral']
                     });
                     return;
                 }
@@ -247,7 +247,7 @@ export async function execute(interaction) {
                         description: `La regla ${type} ha sido ${updatedRule.enabled ? 'activada' : 'desactivada'}.`,
                         color: 0x00FF00
                     })],
-                    ephemeral: true
+                    flags: ['Ephemeral']
                 });
                 break;
             }
@@ -260,7 +260,7 @@ export async function execute(interaction) {
                 description: 'Ha ocurrido un error al procesar el comando.',
                 color: 0xFF0000
             })],
-            ephemeral: true
+            flags: ['Ephemeral']
         });
     }
 } 
