@@ -232,37 +232,54 @@ CREATE TABLE IF NOT EXISTS xp_multipliers (
 CREATE TABLE IF NOT EXISTS mod_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id TEXT NOT NULL,
-    moderator_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
-    action_type TEXT NOT NULL CHECK (action_type IN ('warn', 'mute', 'kick', 'ban', 'unmute', 'unban')),
+    moderator_id TEXT NOT NULL,
+    action_type TEXT NOT NULL, -- 'WARN', 'MUTE', 'KICK', 'BAN', 'TIMEOUT'
     reason TEXT,
-    duration INTEGER, -- Duración en minutos para mutes temporales
-    expires_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    duration INTEGER, -- en segundos, para mutes y timeouts
+    created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+    expires_at INTEGER, -- para mutes y timeouts
+    active BOOLEAN DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS mod_config (
+CREATE TABLE IF NOT EXISTS auto_mod_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    rule_type TEXT NOT NULL, -- 'SPAM', 'CAPS', 'LINKS', 'MENTIONS', 'WORDS'
+    rule_data TEXT NOT NULL, -- JSON con configuración específica de la regla
+    action TEXT NOT NULL, -- 'WARN', 'MUTE', 'KICK', 'BAN', 'DELETE'
+    enabled BOOLEAN DEFAULT 1,
+    created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+CREATE TABLE IF NOT EXISTS filtered_words (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    word TEXT NOT NULL,
+    severity INTEGER DEFAULT 1, -- 1: bajo, 2: medio, 3: alto
+    created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+    UNIQUE(guild_id, word)
+);
+
+CREATE TABLE IF NOT EXISTS strike_config (
     guild_id TEXT PRIMARY KEY,
-    log_channel_id TEXT,
-    mute_role_id TEXT,
-    auto_mod_enabled BOOLEAN DEFAULT 0,
-    spam_threshold INTEGER DEFAULT 5,
-    spam_interval INTEGER DEFAULT 5000, -- en milisegundos
-    raid_protection_enabled BOOLEAN DEFAULT 0,
-    raid_join_threshold INTEGER DEFAULT 10,
-    raid_time_threshold INTEGER DEFAULT 10000, -- en milisegundos
-    filtered_words TEXT DEFAULT '[]', -- Array de palabras filtradas
-    warn_thresholds TEXT DEFAULT '{"3": "mute", "5": "kick", "7": "ban"}' -- JSON de umbrales
+    strikes_for_mute INTEGER DEFAULT 3,
+    strikes_for_kick INTEGER DEFAULT 5,
+    strikes_for_ban INTEGER DEFAULT 7,
+    mute_duration INTEGER DEFAULT 3600, -- 1 hora en segundos
+    strike_expiry INTEGER DEFAULT 2592000 -- 30 días en segundos
 );
 
-CREATE TABLE IF NOT EXISTS auto_mod_logs (
+CREATE TABLE IF NOT EXISTS user_strikes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
-    action_type TEXT NOT NULL,
-    trigger_type TEXT NOT NULL, -- 'spam', 'raid', 'words', 'mentions'
-    content TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    reason TEXT,
+    moderator_id TEXT NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+    expires_at INTEGER,
+    active BOOLEAN DEFAULT 1
 );
 
 -- Sistema de Bienvenida
@@ -391,4 +408,13 @@ SELECT
         ORDER BY w.date
         ROWS UNBOUNDED PRECEDING
     ) as member_count
-FROM welcome_stats w; 
+FROM welcome_stats w;
+
+-- Triggers para actualización de timestamps
+CREATE TRIGGER IF NOT EXISTS update_auto_mod_rules_timestamp 
+AFTER UPDATE ON auto_mod_rules
+BEGIN
+    UPDATE auto_mod_rules 
+    SET updated_at = (strftime('%s', 'now') * 1000)
+    WHERE id = NEW.id;
+END; 

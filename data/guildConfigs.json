@@ -1,0 +1,32 @@
+{
+  "912887622433636392": {
+    "prefix": "!",
+    "language": "es",
+    "welcomeChannel": null,
+    "logChannel": null,
+    "musicChannel": null,
+    "djRole": null,
+    "moderationRoles": [],
+    "autoRoles": [],
+    "levelSystem": {
+      "enabled": true,
+      "announceChannel": null,
+      "xpRate": 1,
+      "xpPerMessage": 15,
+      "cooldown": 60,
+      "roleRewards": {}
+    },
+    "disabledCommands": [],
+    "customCommands": {},
+    "automod": {
+      "enabled": false,
+      "ignoredChannels": [],
+      "ignoredRoles": [],
+      "maxMentions": 5,
+      "maxLines": 10,
+      "filterInvites": true,
+      "filterLinks": false,
+      "filterWords": []
+    }
+  }
+}

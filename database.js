@@ -55,6 +55,51 @@ export async function initializeDatabase() {
                 updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
             );
 
+            -- Tabla de auto-moderación
+            CREATE TABLE IF NOT EXISTS auto_mod_rules (
+                guild_id TEXT,
+                enabled BOOLEAN DEFAULT false,
+                max_mentions INTEGER DEFAULT 5,
+                max_lines INTEGER DEFAULT 10,
+                filter_invites BOOLEAN DEFAULT true,
+                filter_links BOOLEAN DEFAULT false,
+                ignored_channels TEXT DEFAULT '[]',
+                ignored_roles TEXT DEFAULT '[]',
+                filtered_words TEXT DEFAULT '[]',
+                PRIMARY KEY (guild_id)
+            );
+
+            -- Crear tablas de auto-moderación
+            CREATE TABLE IF NOT EXISTS filtered_words (
+                guild_id TEXT,
+                word TEXT,
+                rule_type TEXT DEFAULT 'block',
+                created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+                PRIMARY KEY (guild_id, word)
+            );
+
+            CREATE TABLE IF NOT EXISTS auto_mod_settings (
+                guild_id TEXT PRIMARY KEY,
+                enabled BOOLEAN DEFAULT false,
+                max_mentions INTEGER DEFAULT 5,
+                max_lines INTEGER DEFAULT 10,
+                filter_invites BOOLEAN DEFAULT true,
+                filter_links BOOLEAN DEFAULT false,
+                ignored_channels TEXT DEFAULT '[]',
+                ignored_roles TEXT DEFAULT '[]',
+                created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+            );
+
+            CREATE TABLE IF NOT EXISTS auto_mod_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT,
+                user_id TEXT,
+                action TEXT,
+                reason TEXT,
+                created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+            );
+
             -- Trigger para actualizar updated_at en levels
             CREATE TRIGGER IF NOT EXISTS update_levels_timestamp 
             AFTER UPDATE ON levels

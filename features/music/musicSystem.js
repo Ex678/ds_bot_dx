@@ -10,13 +10,12 @@ import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'disc
 import ytdl from '@distube/ytdl-core';
 import { search } from 'youtube-search-without-api-key';
 
-// Mapa para almacenar los reproductores de música por servidor
-const guildPlayers = new Map();
-// Mapa para almacenar las colas de reproducción por servidor
-const guildQueues = new Map();
+// Exportar variables para uso en otros módulos
+export const guildPlayers = new Map();
+export const guildQueues = new Map();
 
 // Constantes para emojis y colores
-const EMOJIS = {
+export const EMOJIS = {
     PLAY: '▶️',
     PAUSE: '⏸️',
     SKIP: '⏭️',
@@ -36,7 +35,7 @@ const EMOJIS = {
     NOTES: ['🎵', '🎶', '🎼', '🎹', '🎸', '🎺', '🥁', '🎻']
 };
 
-const COLORS = {
+export const COLORS = {
     PRIMARY: 0x0099FF,
     SUCCESS: 0x00FF00,
     ERROR: 0xFF0000,
@@ -58,7 +57,8 @@ function getOrCreatePlayer(guildId) {
             connection: null,
             currentTrack: null,
             isPlaying: false,
-            lastVoiceChannel: null
+            lastVoiceChannel: null,
+            currentResource: null
         };
         guildPlayers.set(guildId, playerData);
     }
@@ -98,14 +98,22 @@ async function searchSong(query) {
  * @param {string} url - URL del video
  * @returns {Promise<Object>} Recurso de audio
  */
-async function createYouTubeResource(url) {
+async function createYouTubeResource(url, playerData) {
     try {
         const stream = ytdl(url, {
             filter: 'audioonly',
             quality: 'highestaudio',
             highWaterMark: 1 << 25
         });
-        return createAudioResource(stream);
+
+        const resource = createAudioResource(stream);
+        
+        playerData.currentResource = {
+            stream: stream,
+            resource: resource
+        };
+
+        return resource;
     } catch (error) {
         console.error('[Music System] Error al crear recurso de audio:', error);
         throw error;
@@ -148,6 +156,90 @@ async function connectToChannel(channel, guildId) {
         connection.destroy();
         throw error;
     }
+}
+
+/**
+ * Crea una barra de progreso visual
+ * @param {number} current - Tiempo actual en segundos
+ * @param {number} total - Duración total en segundos
+ * @returns {string} Barra de progreso con formato
+ */
+function createProgressBar(current, total) {
+    const length = 20;
+    const progress = Math.round((current / total) * length);
+    const emptyProgress = length - progress;
+
+    const progressText = '▰'.repeat(progress);
+    const emptyProgressText = '▱'.repeat(emptyProgress);
+    const percentageText = Math.round((current / total) * 100);
+
+    function formatTime(seconds) {
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = Math.floor(seconds % 60);
+        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    }
+
+    return {
+        bar: `${progressText}${emptyProgressText}`,
+        percentage: percentageText,
+        currentTime: formatTime(current),
+        totalTime: formatTime(total),
+        text: `\`${formatTime(current)} [${progressText}${emptyProgressText}] ${formatTime(total)}\``
+    };
+}
+
+/**
+ * Actualiza el mensaje de "reproduciendo ahora" con el progreso actual
+ * @param {string} guildId - ID del servidor
+ */
+async function updateNowPlayingMessage(guildId) {
+    const { playerData, queueData } = getOrCreatePlayer(guildId);
+    
+    if (!playerData.isPlaying || !queueData.nowPlayingMessage || !playerData.currentTrack) {
+        return;
+    }
+
+    try {
+        const track = playerData.currentTrack;
+        const resource = playerData.currentResource.resource;
+        
+        // Calcular el progreso
+        const playbackTime = resource.playbackDuration / 1000; // Convertir a segundos
+        const duration = parseDuration(track.duration);
+        const progress = createProgressBar(playbackTime, duration);
+
+        // Actualizar el embed
+        const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle(`${EMOJIS.NOW_PLAYING} Reproduciendo ahora`)
+            .setDescription(`${EMOJIS.MUSIC} **${track.title}**\n\n${progress.text}`)
+            .setThumbnail(track.thumbnail)
+            .addFields(
+                { name: `${EMOJIS.TIME} Duración`, value: track.duration, inline: true },
+                { name: `${EMOJIS.USER} Solicitado por`, value: track.requestedBy, inline: true },
+                { name: `${EMOJIS.VOLUME} Volumen`, value: `${Math.round(playerData.audioEffects.volume * 100)}%`, inline: true }
+            )
+            .setTimestamp();
+
+        const buttons = createControlButtons(playerData);
+
+        await queueData.nowPlayingMessage.edit({
+            embeds: [embed],
+            components: [buttons]
+        });
+    } catch (error) {
+        console.error('[Music System] Error al actualizar progreso:', error);
+    }
+}
+
+/**
+ * Convierte una duración en formato MM:SS a segundos
+ * @param {string} duration - Duración en formato MM:SS
+ * @returns {number} Duración en segundos
+ */
+function parseDuration(duration) {
+    const [minutes, seconds] = duration.split(':').map(Number);
+    return (minutes * 60) + seconds;
 }
 
 /**
@@ -221,34 +313,33 @@ async function playSong(interaction, query) {
  * @returns {ActionRowBuilder} Fila de botones
  */
 function createControlButtons(playerData) {
-    return new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId('music_pause_resume')
-                .setLabel(playerData.player.state.status === 'playing' ? 'Pausar' : 'Reanudar')
-                .setStyle(playerData.player.state.status === 'playing' ? ButtonStyle.Secondary : ButtonStyle.Success)
-                .setEmoji(playerData.player.state.status === 'playing' ? EMOJIS.PAUSE : EMOJIS.PLAY),
-            new ButtonBuilder()
-                .setCustomId('music_skip')
-                .setLabel('Saltar')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji(EMOJIS.SKIP),
-            new ButtonBuilder()
-                .setCustomId('music_stop')
-                .setLabel('Detener')
-                .setStyle(ButtonStyle.Danger)
-                .setEmoji(EMOJIS.STOP),
-            new ButtonBuilder()
-                .setCustomId('music_queue')
-                .setLabel('Ver Cola')
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji(EMOJIS.QUEUE),
-            new ButtonBuilder()
-                .setCustomId('music_leave')
-                .setLabel('Salir')
-                .setStyle(ButtonStyle.Danger)
-                .setEmoji(EMOJIS.LEAVE)
-        );
+    const row = new ActionRowBuilder();
+
+    // Botón de pausa/reanudar
+    row.addComponents(
+        new ButtonBuilder()
+            .setCustomId('music_pause')
+            .setEmoji(playerData.player.state.status === AudioPlayerStatus.Playing ? EMOJIS.PAUSE : EMOJIS.PLAY)
+            .setStyle(ButtonStyle.Primary)
+    );
+
+    // Botón de saltar
+    row.addComponents(
+        new ButtonBuilder()
+            .setCustomId('music_skip')
+            .setEmoji(EMOJIS.SKIP)
+            .setStyle(ButtonStyle.Secondary)
+    );
+
+    // Botón de detener
+    row.addComponents(
+        new ButtonBuilder()
+            .setCustomId('music_stop')
+            .setEmoji(EMOJIS.STOP)
+            .setStyle(ButtonStyle.Danger)
+    );
+
+    return row;
 }
 
 /**
@@ -264,55 +355,74 @@ async function startPlaying(interaction, guildId) {
         return;
     }
 
-    const track = queueData.tracks.shift();
-    queueData.currentTrack = track;
-    playerData.isPlaying = true;
-
     try {
-        const resource = await createYouTubeResource(track.url);
+        // Obtener la siguiente canción
+        const track = queueData.tracks.shift();
+        queueData.currentTrack = track;
+        playerData.currentTrack = track;
+
+        // Crear y reproducir el recurso de audio
+        const resource = await createYouTubeResource(track.url, playerData);
         playerData.player.play(resource);
+        playerData.isPlaying = true;
 
-        const randomNote = EMOJIS.NOTES[Math.floor(Math.random() * EMOJIS.NOTES.length)];
-        const progressBar = `${EMOJIS.WAVE}${EMOJIS.WAVE}${EMOJIS.WAVE}${EMOJIS.WAVE}${EMOJIS.WAVE}`;
-
+        // Crear embed inicial
         const embed = new EmbedBuilder()
             .setColor(COLORS.PRIMARY)
-            .setTitle(`${EMOJIS.NOW_PLAYING} Reproduciendo ahora ${randomNote}`)
-            .setDescription(`**${track.title}**\n\n${progressBar}`)
+            .setTitle(`${EMOJIS.NOW_PLAYING} Reproduciendo ahora`)
+            .setDescription(`${EMOJIS.MUSIC} **${track.title}**\n\n\`0:00 [${('▱').repeat(20)}] ${track.duration}\``)
             .setThumbnail(track.thumbnail)
             .addFields(
                 { name: `${EMOJIS.TIME} Duración`, value: track.duration, inline: true },
-                { name: `${EMOJIS.USER} Solicitado por`, value: track.requestedBy, inline: true }
+                { name: `${EMOJIS.USER} Solicitado por`, value: track.requestedBy, inline: true },
+                { name: `${EMOJIS.VOLUME} Volumen`, value: `${Math.round(playerData.audioEffects.volume * 100)}%`, inline: true }
             )
-            .setTimestamp()
-            .setFooter({ text: `Usa los controles debajo para gestionar la reproducción ${EMOJIS.VOLUME}` });
+            .setTimestamp();
 
-        const row = createControlButtons(playerData);
+        const buttons = createControlButtons(playerData);
 
-        // Solo enviar mensaje si hay una interacción válida
-        if (interaction && !interaction.replied && !interaction.deferred) {
-            const message = await interaction.reply({ embeds: [embed], components: [row] });
-            queueData.nowPlayingMessage = message;
-        } else if (queueData.nowPlayingMessage) {
-            // Si ya hay un mensaje de "now playing", actualizarlo
-            try {
-                await queueData.nowPlayingMessage.edit({ embeds: [embed], components: [row] });
-            } catch (error) {
-                console.error('[Music System] Error al actualizar mensaje:', error);
-            }
+        // Enviar o actualizar mensaje
+        if (interaction.replied || interaction.deferred) {
+            queueData.nowPlayingMessage = await interaction.channel.send({
+                embeds: [embed],
+                components: [buttons]
+            });
+        } else {
+            queueData.nowPlayingMessage = await interaction.reply({
+                embeds: [embed],
+                components: [buttons],
+                fetchReply: true
+            });
         }
 
-        // Configurar eventos del reproductor
-        playerData.player.once(AudioPlayerStatus.Idle, () => {
-            playerData.isPlaying = false;
-            if (queueData.tracks.length > 0) {
-                startPlaying(null, guildId);
+        // Iniciar actualización periódica
+        const updateInterval = setInterval(() => {
+            if (!playerData.isPlaying) {
+                clearInterval(updateInterval);
+                return;
             }
+            updateNowPlayingMessage(guildId);
+        }, 5000); // Actualizar cada 5 segundos
+
+        // Configurar el manejador para cuando termine la canción
+        playerData.player.once(AudioPlayerStatus.Idle, () => {
+            clearInterval(updateInterval);
+            startPlaying(interaction, guildId);
         });
+
     } catch (error) {
-        console.error('[Music System] Error al iniciar reproducción:', error);
-        playerData.isPlaying = false;
-        throw error;
+        console.error('[Music System] Error al reproducir:', error);
+        if (interaction.replied || interaction.deferred) {
+            await interaction.channel.send({
+                content: `${EMOJIS.ERROR} ¡Error al reproducir la canción!`,
+                ephemeral: true
+            });
+        } else {
+            await interaction.reply({
+                content: `${EMOJIS.ERROR} ¡Error al reproducir la canción!`,
+                ephemeral: true
+            });
+        }
     }
 }
 
@@ -393,120 +503,64 @@ function getQueue(guildId) {
  * @param {Object} interaction - Interacción de Discord
  */
 async function handleButton(interaction) {
+    const { guildId } = interaction;
+    const { playerData } = getOrCreatePlayer(guildId);
+
+    if (!playerData.isPlaying) {
+        return interaction.reply({
+            content: `${EMOJIS.ERROR} ¡No hay música reproduciéndose!`,
+            ephemeral: true
+        });
+    }
+
     try {
-        const { customId, guildId } = interaction;
-        const playerData = guildPlayers.get(guildId);
-
-        if (!playerData || (!playerData.isPlaying && customId !== 'music_queue')) {
-            return interaction.reply({ 
-                content: '❌ ¡No hay nada reproduciéndose!', 
-                ephemeral: true 
-            });
-        }
-
-        switch (customId) {
-            case 'music_pause_resume':
-                if (playerData.player.state.status === 'playing') {
-                    if (pauseTrack(guildId)) {
-                        await interaction.reply({ 
-                            content: `${EMOJIS.PAUSE} Música pausada`, 
-                            ephemeral: true 
-                        });
-                    }
+        switch (interaction.customId) {
+            case 'music_pause':
+                if (playerData.player.state.status === AudioPlayerStatus.Playing) {
+                    pauseTrack(guildId);
+                    await interaction.reply({
+                        content: `${EMOJIS.PAUSE} Música pausada`,
+                        ephemeral: true
+                    });
                 } else {
-                    if (resumeTrack(guildId)) {
-                        await interaction.reply({ 
-                            content: `${EMOJIS.PLAY} Música reanudada`, 
-                            ephemeral: true 
-                        });
-                    }
+                    resumeTrack(guildId);
+                    await interaction.reply({
+                        content: `${EMOJIS.PLAY} Música reanudada`,
+                        ephemeral: true
+                    });
                 }
                 break;
 
             case 'music_skip':
                 skipTrack(guildId);
-                await interaction.reply({ 
-                    content: `${EMOJIS.SKIP} Canción saltada`, 
-                    ephemeral: true 
+                await interaction.reply({
+                    content: `${EMOJIS.SKIP} Canción saltada`,
+                    ephemeral: true
                 });
                 break;
 
             case 'music_stop':
                 stopPlaying(guildId);
-                await interaction.reply({ 
-                    content: `${EMOJIS.STOP} Reproducción detenida`, 
-                    ephemeral: true 
+                await interaction.reply({
+                    content: `${EMOJIS.STOP} Reproducción detenida`,
+                    ephemeral: true
                 });
                 break;
-
-            case 'music_leave':
-                if (playerData.connection) {
-                    playerData.connection.destroy();
-                    playerData.connection = null;
-                    playerData.lastVoiceChannel = null;
-                    await interaction.reply({ 
-                        content: `${EMOJIS.LEAVE} ¡Hasta la próxima! ${EMOJIS.WAVE}`, 
-                        ephemeral: true 
-                    });
-                }
-                break;
-
-            case 'music_queue':
-                const queueData = getQueue(guildId);
-                if (!queueData || (!queueData.currentTrack && queueData.tracks.length === 0)) {
-                    return interaction.reply({ 
-                        content: `${EMOJIS.ERROR} ¡No hay canciones en la cola!`, 
-                        ephemeral: true 
-                    });
-                }
-
-                const randomNote = EMOJIS.NOTES[Math.floor(Math.random() * EMOJIS.NOTES.length)];
-                const embed = new EmbedBuilder()
-                    .setColor(COLORS.PRIMARY)
-                    .setTitle(`${EMOJIS.QUEUE} Cola de Reproducción ${randomNote}`)
-                    .setTimestamp();
-
-                if (queueData.currentTrack) {
-                    embed.addFields({
-                        name: `${EMOJIS.NOW_PLAYING} Reproduciendo ahora:`,
-                        value: `**${queueData.currentTrack.title}**\nSolicitado por: ${queueData.currentTrack.requestedBy}`
-                    });
-                }
-
-                if (queueData.tracks.length > 0) {
-                    const nextSongs = queueData.tracks
-                        .slice(0, 10)
-                        .map((track, index) => 
-                            `${index + 1}. ${EMOJIS.NEXT} **${track.title}**\n${EMOJIS.USER} Solicitado por: ${track.requestedBy}`
-                        )
-                        .join('\n\n');
-
-                    embed.addFields({
-                        name: `${EMOJIS.QUEUE} Siguientes canciones:`,
-                        value: nextSongs
-                    });
-
-                    if (queueData.tracks.length > 10) {
-                        embed.setFooter({ 
-                            text: `Y ${queueData.tracks.length - 10} canciones más... ${EMOJIS.NOTES[Math.floor(Math.random() * EMOJIS.NOTES.length)]}` 
-                        });
-                    }
-                }
-
-                await interaction.reply({ embeds: [embed], ephemeral: true });
-                break;
         }
 
-        // Actualizar los botones si el mensaje aún existe
-        if (interaction.message && !interaction.message.ephemeral) {
-            const row = createControlButtons(playerData);
-            await interaction.message.edit({ components: [row] });
+        // Actualizar los botones después de cualquier cambio
+        if (playerData.queueData && playerData.queueData.nowPlayingMessage) {
+            const buttons = createControlButtons(playerData);
+            await playerData.queueData.nowPlayingMessage.edit({
+                components: [buttons]
+            });
         }
+
     } catch (error) {
-        console.error('[Music System] Error al procesar el botón:', error);
-        await interaction.reply({ 
-            content: '❌ ¡Hubo un error al procesar el control!', 
-            ephemeral: true 
+        console.error('[Music System] Error al manejar botón:', error);
+        await interaction.reply({
+            content: `${EMOJIS.ERROR} ¡Hubo un error al procesar el comando!`,
+            ephemeral: true
         });
     }
 }
@@ -518,7 +572,5 @@ export {
     skipTrack,
     stopPlaying,
     getQueue,
-    handleButton,
-    guildPlayers,
-    guildQueues
+    handleButton
 }; 
