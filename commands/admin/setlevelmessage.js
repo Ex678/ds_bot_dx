@@ -1,45 +1,54 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
-import { updateGuildSettings } from '../../database.js';
+import { SlashCommandBuilder } from 'discord.js';
+import { updateGuildSettings, getGuildSettings } from '../../utils/storage.js';
 
 export const data = new SlashCommandBuilder()
     .setName('setlevelmessage')
-    .setDescription('Configura el mensaje que se enviará cuando alguien suba de nivel')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDescription('Configura el mensaje de subida de nivel')
     .addStringOption(option =>
         option.setName('mensaje')
-            .setDescription('El mensaje a enviar. Usa {user} para el usuario y {level} para el nivel')
+            .setDescription('El mensaje a mostrar (usa {user} para el usuario y {level} para el nivel)')
             .setRequired(true));
 
 export async function execute(interaction) {
-    try {
-        const message = interaction.options.getString('mensaje');
-
-        // Verificar que el mensaje contenga los placeholders necesarios
-        if (!message.includes('{user}') || !message.includes('{level}')) {
-            return interaction.reply({
-                content: '❌ El mensaje debe incluir {user} y {level} para mostrar el usuario y su nivel.',
-                ephemeral: true
-            });
-        }
-
-        await updateGuildSettings(interaction.guild.id, {
-            level_up_message: message
+    if (!interaction.member.permissions.has('MANAGE_GUILD')) {
+        return await interaction.reply({
+            content: '❌ No tienes permisos para usar este comando.',
+            ephemeral: true
         });
+    }
 
-        // Mostrar ejemplo
+    const message = interaction.options.getString('mensaje');
+
+    // Verificar que el mensaje contiene las variables necesarias
+    if (!message.includes('{user}') || !message.includes('{level}')) {
+        return await interaction.reply({
+            content: '❌ El mensaje debe incluir {user} y {level} para ser válido.',
+            ephemeral: true
+        });
+    }
+
+    const currentSettings = getGuildSettings(interaction.guildId);
+    const newSettings = {
+        ...currentSettings,
+        levelUpMessage: message
+    };
+
+    try {
+        updateGuildSettings(interaction.guildId, newSettings);
+        
+        // Mostrar ejemplo del mensaje
         const exampleMessage = message
             .replace('{user}', interaction.user.toString())
             .replace('{level}', '5');
 
         await interaction.reply({
-            content: `✅ Mensaje configurado. Ejemplo:\n${exampleMessage}`,
+            content: `✅ Mensaje de nivel actualizado.\nEjemplo:\n${exampleMessage}`,
             ephemeral: true
         });
-
     } catch (error) {
-        console.error('[SetLevelMessage] Error:', error);
+        console.error('Error al configurar mensaje de nivel:', error);
         await interaction.reply({
-            content: '❌ Ocurrió un error al configurar el mensaje.',
+            content: '❌ Hubo un error al configurar el mensaje.',
             ephemeral: true
         });
     }

@@ -1,5 +1,5 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { getDatabase } from '../../database.js';
+import { initializeStorage as getDatabase } from '../../utils/storage.js';
 
 // Constantes para emojis y colores
 const EMOJIS = {

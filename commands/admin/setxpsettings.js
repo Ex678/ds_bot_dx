@@ -1,44 +1,52 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
-import { updateGuildSettings } from '../../database.js';
+import { SlashCommandBuilder } from 'discord.js';
+import { updateGuildSettings, getGuildSettings } from '../../utils/storage.js';
 
 export const data = new SlashCommandBuilder()
     .setName('setxpsettings')
-    .setDescription('Configura los ajustes del sistema de XP')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDescription('Configura los ajustes de XP del servidor')
     .addIntegerOption(option =>
-        option.setName('xp_base')
-            .setDescription('XP base por mensaje')
-            .setRequired(true)
+        option.setName('xp_por_mensaje')
+            .setDescription('Cantidad de XP base por mensaje')
             .setMinValue(1)
             .setMaxValue(100))
     .addIntegerOption(option =>
         option.setName('cooldown')
             .setDescription('Tiempo en segundos entre mensajes que dan XP')
-            .setRequired(true)
             .setMinValue(10)
-            .setMaxValue(3600));
+            .setMaxValue(300));
 
 export async function execute(interaction) {
-    try {
-        const xpPerMessage = interaction.options.getInteger('xp_base');
-        const cooldown = interaction.options.getInteger('cooldown');
-
-        await updateGuildSettings(interaction.guild.id, {
-            xp_per_message: xpPerMessage,
-            xp_cooldown_seconds: cooldown
-        });
-
-        await interaction.reply({
-            content: `✅ Configuración actualizada:\n` +
-                `• XP base por mensaje: **${xpPerMessage}**\n` +
-                `• Cooldown entre mensajes: **${cooldown}** segundos`,
+    if (!interaction.member.permissions.has('MANAGE_GUILD')) {
+        return await interaction.reply({
+            content: '❌ No tienes permisos para usar este comando.',
             ephemeral: true
         });
+    }
 
-    } catch (error) {
-        console.error('[SetXPSettings] Error:', error);
+    const xpPerMessage = interaction.options.getInteger('xp_por_mensaje');
+    const cooldown = interaction.options.getInteger('cooldown');
+
+    const currentSettings = getGuildSettings(interaction.guildId);
+    const newSettings = {
+        ...currentSettings,
+        xpSettings: {
+            xpPerMessage: xpPerMessage || currentSettings.xpSettings.xpPerMessage,
+            cooldown: cooldown || currentSettings.xpSettings.cooldown
+        }
+    };
+
+    try {
+        updateGuildSettings(interaction.guildId, newSettings);
         await interaction.reply({
-            content: '❌ Ocurrió un error al configurar los ajustes de XP.',
+            content: `✅ Configuración de XP actualizada:\n` +
+                    `• XP por mensaje: ${newSettings.xpSettings.xpPerMessage}\n` +
+                    `• Cooldown: ${newSettings.xpSettings.cooldown} segundos`,
+            ephemeral: true
+        });
+    } catch (error) {
+        console.error('Error al actualizar configuración de XP:', error);
+        await interaction.reply({
+            content: '❌ Hubo un error al actualizar la configuración.',
             ephemeral: true
         });
     }

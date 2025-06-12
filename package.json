@@ -9,7 +9,8 @@
     "dev": "nodemon index.js",
     "lint": "eslint .",
     "test": "jest",
-    "backup": "node scripts/backup.js"
+    "backup": "node scripts/backup.js",
+    "deploy": "node deploy-commands.js"
   },
   "keywords": [
     "discord",
@@ -21,8 +22,8 @@
   "author": "Ex678",
   "license": "MIT",
   "dependencies": {
-    "axios": "^1.9.0",
-    "better-sqlite3": "^8.4.0",
+    "@discordjs/voice": "^0.16.1",
+    "axios": "^1.6.2",
     "discord.js": "^14.14.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
@@ -30,10 +31,10 @@
     "node-cron": "^3.0.3",
     "node-schedule": "^2.1.1",
     "play-dl": "^1.9.7",
+    "spotify-web-api-node": "^5.0.2",
     "winston": "^3.11.0",
     "winston-daily-rotate-file": "^4.7.1",
-    "xml2js": "^0.6.2",
-    "spotify-web-api-node": "^5.0.2"
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "eslint": "^8.56.0",

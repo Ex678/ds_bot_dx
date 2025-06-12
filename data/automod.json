@@ -1,0 +1,12 @@
+{
+  "912887622433636392": [
+    {
+      "rule_type": "banned_words",
+      "rule_value": "nigga, porno"
+    },
+    {
+      "rule_type": "anti_spam",
+      "rule_value": null
+    }
+  ]
+}

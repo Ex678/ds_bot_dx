@@ -1,5 +1,5 @@
 // Importando las clases de discord
-import { Client, Collection, Events, GatewayIntentBits, EmbedBuilder } from 'discord.js';
+import { Client, Collection, Events, GatewayIntentBits } from 'discord.js';
 import { config } from './config.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -7,7 +7,7 @@ import { readdirSync } from 'fs';
 import express from 'express';
 import * as youtubeNotifier from './events/youtubeNotifier.js';
 import { handleMessageForXP, checkAndHandleLevelUp, handleRoleRewards } from './features/levelingSystem.js';
-import { initializeDatabase, closeDatabase } from './database.js';
+import { initializeStorage, closeStorage } from './utils/storage.js';
 import logger from './utils/logger.js';
 import rateLimiter from './utils/rateLimiter.js';
 import guildConfig from './utils/guildConfig.js';
@@ -62,60 +62,42 @@ for (const folder of commandFolders) {
         
         if ('data' in command && 'execute' in command) {
             client.commands.set(command.data.name, command);
-            logger.debug(`Comando cargado: ${command.data.name}`);
+            logger.info(`✓ Comando cargado: ${command.data.name}`);
         } else {
-            logger.warn(`[WARNING] El comando en ${filePath} no tiene "data" o "execute" requeridos.`);
+            logger.warn(`[WARNING] El comando en ${filePath} no tiene las propiedades requeridas 'data' o 'execute'.`);
         }
     }
 }
 
-// Manejar comandos slash e interacciones de botones
+// Manejar interacciones
 client.on(Events.InteractionCreate, async interaction => {
     try {
         if (interaction.isChatInputCommand()) {
             const command = client.commands.get(interaction.commandName);
 
             if (!command) {
-                logger.error(`Comando ${interaction.commandName} no encontrado.`);
-                return interaction.reply({
-                    content: '❌ ¡Comando no encontrado!',
-                    ephemeral: true
-                });
+                logger.warn(`No se encontró el comando ${interaction.commandName}`);
+                return;
             }
 
-            // Verificar rate limits
-            const userId = interaction.user.id;
-            if (rateLimiter.isRateLimited(userId)) {
-                return interaction.reply({
-                    content: '⚠️ ¡Estás usando comandos demasiado rápido! Por favor, espera un momento.',
+            try {
+                await command.execute(interaction);
+            } catch (error) {
+                logger.error(`Error ejecutando el comando ${interaction.commandName}:`, error);
+                
+                const errorMessage = {
+                    content: '❌ ¡Hubo un error al ejecutar este comando!',
                     ephemeral: true
-                });
+                };
+
+                if (!interaction.replied && interaction.deferred) {
+                    await interaction.editReply(errorMessage);
+                } else if (interaction.replied) {
+                    await interaction.followUp(errorMessage);
+                } else {
+                    await interaction.reply(errorMessage);
+                }
             }
-
-            // Verificar cooldown específico del comando
-            const cooldownAmount = command.cooldown || 3;
-            const timeLeft = rateLimiter.checkCooldown(command.data.name, userId, cooldownAmount);
-            
-            if (timeLeft) {
-                return interaction.reply({
-                    content: `⏳ Por favor espera ${timeLeft} segundos antes de usar el comando \`${command.data.name}\` nuevamente.`,
-                    ephemeral: true
-                });
-            }
-
-            // Verificar configuración del servidor
-            const guildSettings = interaction.guild ? guildConfig.getConfig(interaction.guild.id) : null;
-            
-            if (guildSettings?.disabledCommands.includes(command.data.name)) {
-                return interaction.reply({
-                    content: '❌ Este comando está deshabilitado en este servidor.',
-                    ephemeral: true
-                });
-            }
-
-            await command.execute(interaction, guildSettings);
-            logger.info(`Comando ${command.data.name} ejecutado por ${interaction.user.tag}`);
-
         } else if (interaction.isButton()) {
             // Manejar botones de música
             if (interaction.customId.startsWith('music_')) {
@@ -150,13 +132,13 @@ client.once(Events.ClientReady, async readyClient => {
     try {
         // Inicializar sistemas
         await Promise.all([
-            initializeDatabase(),
+            initializeStorage(),
             guildConfig.init()
         ]);
 
         // Configurar estado del bot
         client.user.setPresence({
-            activities: [{ name: '/help | Versión 2.0', type: 2 }],
+            activities: [{ name: '/help | Versión 2.1', type: 2 }],
             status: 'online'
         });
 
@@ -170,98 +152,36 @@ client.once(Events.ClientReady, async readyClient => {
     }
 });
 
-// Evento: Mensaje creado (para sistema de niveles)
+// Manejar mensajes para XP
 client.on(Events.MessageCreate, async message => {
     if (message.author.bot || !message.guild) return;
 
     try {
-        const guildSettings = guildConfig.getConfig(message.guild.id);
-        
-        // Verificar si el sistema de niveles está habilitado
-        if (guildSettings.levelSystem.enabled) {
-            const updatedUserData = await handleMessageForXP(message, guildSettings.levelSystem);
-            if (updatedUserData) {
-                const finalUserData = await checkAndHandleLevelUp(message, updatedUserData, guildSettings);
-                if (finalUserData && message.member) {
-                    await handleRoleRewards(message.member, finalUserData, guildSettings.levelSystem.roleRewards);
-                }
+        const xpGained = await handleMessageForXP(message);
+        if (xpGained) {
+            const leveledUp = await checkAndHandleLevelUp(message);
+            if (leveledUp) {
+                await handleRoleRewards(message);
             }
         }
     } catch (error) {
-        logger.error('[Index] Error procesando mensaje para XP/Nivel:', error);
+        logger.error('Error al manejar XP del mensaje:', error);
     }
-});
-
-// Servidor HTTP mejorado
-const app = express();
-
-// Middleware básico de seguridad
-app.use((req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    next();
-});
-
-// Endpoint de estado
-app.get("/status", (req, res) => {
-    const status = {
-        status: "online",
-        uptime: process.uptime(),
-        serverCount: client.guilds.cache.size,
-        userCount: client.users.cache.size,
-        ping: client.ws.ping
-    };
-    res.json(status);
-});
-
-app.get("/", (req, res) => {
-    res.send("El bot está vivo.");
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    logger.info(`Servidor HTTP escuchando en el puerto ${PORT}`);
 });
 
 // Manejar cierre gracioso
-async function handleShutdown(signal) {
-    logger.info(`Recibida señal ${signal}. Iniciando cierre gracioso...`);
-    
-    try {
-        logger.info('Cerrando conexión con la base de datos...');
-        await closeDatabase();
-        
-        logger.info('Guardando configuraciones...');
-        await guildConfig.saveConfigs();
-        
-        logger.info('Desconectando bot...');
-        client.destroy();
-        
-        logger.info('¡Hasta luego!');
-        process.exit(0);
-    } catch (error) {
-        logger.error('Error durante el cierre:', error);
-        process.exit(1);
-    }
-}
-
-process.on('SIGINT', () => handleShutdown('SIGINT'));
-process.on('SIGTERM', () => handleShutdown('SIGTERM'));
-
-// Manejar errores no capturados
-process.on('uncaughtException', (error) => {
-    logger.error('Excepción no capturada:', error);
-    handleShutdown('UNCAUGHT_EXCEPTION');
+process.on('SIGINT', async () => {
+    logger.info('Recibida señal de cierre...');
+    await closeStorage();
+    process.exit(0);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    logger.error('Promesa rechazada no manejada:', { reason, promise });
+process.on('SIGTERM', async () => {
+    logger.info('Recibida señal de terminación...');
+    await closeStorage();
+    process.exit(0);
 });
 
 // Iniciar el bot
-client.login(config.token).catch(error => {
-    logger.error('Error al iniciar sesión:', error);
-    process.exit(1);
-});
+client.login(config.token);
 

@@ -1,5 +1,7 @@
-import { getDatabase } from '../database.js';
+import { getAutoModRules, updateAutoModRule } from './storage.js';
 import { EmbedBuilder } from 'discord.js';
+import logger from './logger.js';
+import { getAutoModRules as getAutoModRulesStorage } from './storage.js';
 
 const COLORS = {
     WARNING: 0xFFA500,
@@ -150,20 +152,16 @@ export function createModActionEmbed({
  * @param {Message} message - Mensaje a verificar
  * @returns {Promise<Object|null>} Resultado de la verificación
  */
-export async function checkAutoMod(message) {
-    const db = getDatabase();
-    
-    // Obtener reglas activas para el servidor
-    const rules = await db.all(`
-        SELECT * FROM auto_mod_rules
-        WHERE guild_id = ? AND enabled = 1
-    `, [message.guild.id]);
-    
+export function checkAutoMod(message) {
+    if (message.author.bot) return false;
+
+    const rules = getAutoModRules(message.guild.id);
+    if (!rules || rules.length === 0) return false;
+
     for (const rule of rules) {
-        const ruleData = JSON.parse(rule.rule_data);
         let violation = false;
         
-        switch (rule.rule_type) {
+        switch (rule.type) {
             case 'SPAM':
                 // Implementar lógica de detección de spam
                 break;
@@ -171,17 +169,17 @@ export async function checkAutoMod(message) {
             case 'CAPS':
                 const upperCount = message.content.replace(/[^A-Z]/g, '').length;
                 const totalCount = message.content.replace(/[^A-Za-z]/g, '').length;
-                if (totalCount > 10 && (upperCount / totalCount) > ruleData.threshold) {
+                if (totalCount > 10 && (upperCount / totalCount) > rule.threshold) {
                     violation = true;
                 }
                 break;
                 
             case 'LINKS':
-                if (ruleData.blocked_domains) {
+                if (rule.blocked_domains) {
                     const urlRegex = /(https?:\/\/[^\s]+)/g;
                     const urls = message.content.match(urlRegex);
                     if (urls && urls.some(url => 
-                        ruleData.blocked_domains.some(domain => url.includes(domain))
+                        rule.blocked_domains.some(domain => url.includes(domain))
                     )) {
                         violation = true;
                     }
@@ -189,21 +187,18 @@ export async function checkAutoMod(message) {
                 break;
                 
             case 'MENTIONS':
-                if (message.mentions.users.size > ruleData.max_mentions) {
+                if (message.mentions.users.size > rule.max_mentions) {
                     violation = true;
                 }
                 break;
                 
             case 'WORDS':
-                const words = await db.all(`
-                    SELECT word, severity FROM filtered_words
-                    WHERE guild_id = ?
-                `, [message.guild.id]);
-                
-                for (const { word, severity } of words) {
-                    if (message.content.toLowerCase().includes(word.toLowerCase())) {
-                        violation = { word, severity };
-                        break;
+                if (rule.filtered_words) {
+                    for (const { word, severity } of rule.filtered_words) {
+                        if (message.content.toLowerCase().includes(word.toLowerCase())) {
+                            violation = { word, severity };
+                            break;
+                        }
                     }
                 }
                 break;
@@ -237,4 +232,100 @@ export async function getUserModHistory(guildId, userId) {
         WHERE ma.guild_id = ? AND ma.user_id = ?
         ORDER BY ma.created_at DESC
     `, [guildId, userId]);
-} 
+}
+
+export function checkMessage(message) {
+    if (message.author.bot) return false;
+
+    const rules = getAutoModRulesStorage(message.guild.id);
+    if (!rules || rules.length === 0) return false;
+
+    for (const rule of rules) {
+        switch (rule.rule_type) {
+            case 'banned_words': {
+                const words = rule.rule_value.split(',').map(word => word.trim().toLowerCase());
+                const content = message.content.toLowerCase();
+                
+                for (const word of words) {
+                    if (content.includes(word)) {
+                        message.delete().catch(error => {
+                            logger.error('Error al eliminar mensaje con palabra prohibida:', error);
+                        });
+                        message.channel.send(`⚠️ ${message.author}, ese tipo de lenguaje no está permitido.`);
+                        return true;
+                    }
+                }
+                break;
+            }
+            case 'anti_spam': {
+                const maxMessages = parseInt(rule.rule_value);
+                const messages = message.channel.messages.cache
+                    .filter(m => 
+                        m.author.id === message.author.id &&
+                        m.createdTimestamp > Date.now() - 5000
+                    );
+
+                if (messages.size >= maxMessages) {
+                    message.delete().catch(error => {
+                        logger.error('Error al eliminar mensaje de spam:', error);
+                    });
+                    message.channel.send(`⚠️ ${message.author}, por favor no hagas spam.`);
+                    return true;
+                }
+                break;
+            }
+            case 'anti_mention': {
+                const maxMentions = parseInt(rule.rule_value);
+                const mentions = message.mentions.users.size + message.mentions.roles.size;
+
+                if (mentions > maxMentions) {
+                    message.delete().catch(error => {
+                        logger.error('Error al eliminar mensaje con menciones excesivas:', error);
+                    });
+                    message.channel.send(`⚠️ ${message.author}, demasiadas menciones en un solo mensaje.`);
+                    return true;
+                }
+                break;
+            }
+            case 'anti_link': {
+                const allowedDomains = rule.rule_value.split(',').map(domain => domain.trim());
+                const urlRegex = /(https?:\/\/[^\s]+)/g;
+                const urls = message.content.match(urlRegex);
+
+                if (urls) {
+                    const hasDisallowedUrl = urls.some(url => {
+                        const domain = new URL(url).hostname;
+                        return !allowedDomains.some(allowed => domain.includes(allowed));
+                    });
+
+                    if (hasDisallowedUrl) {
+                        message.delete().catch(error => {
+                            logger.error('Error al eliminar mensaje con enlace no permitido:', error);
+                        });
+                        message.channel.send(`⚠️ ${message.author}, los enlaces no están permitidos.`);
+                        return true;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    return false;
+}
+
+export function updateAutoModeration(guildId, settings) {
+    try {
+        for (const [key, value] of Object.entries(settings)) {
+            updateAutoModRule(guildId, key, value.toString());
+        }
+        return true;
+    } catch (error) {
+        logger.error('Error al actualizar reglas de auto-moderación:', error);
+        return false;
+    }
+}
+
+export {
+    COLORS
+}; 

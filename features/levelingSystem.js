@@ -1,8 +1,9 @@
 import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
-import { getDatabase, getGuildSettings, getLevelRoles } from '../database.js';
+import { initializeStorage as getDatabase, getGuildSettings, getUserData, updateUserXP, getRoleRewards } from '../utils/storage.js';
 import { EmbedBuilder } from 'discord.js';
+import logger from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,7 +36,7 @@ const COLORS = {
 
 // --- XP GAIN CONFIGURATION ---
 // Base XP awarded for each message.
-const XP_PER_MESSAGE = 10;
+const XP_PER_MESSAGE = 15;
 // For every `XP_BONUS_PER_CHARS` characters in a message, `XP_BONUS_CHAR_UNIT` XP is added.
 const XP_BONUS_PER_CHARS = 10; 
 // How much XP is awarded per unit of `XP_BONUS_PER_CHARS`.
@@ -43,7 +44,7 @@ const XP_BONUS_CHAR_UNIT = 1;
 // Maximum XP that can be gained from message length bonus.
 const MAX_XP_BONUS_FROM_LENGTH = 5;
 // Cooldown in seconds between messages that grant XP to a user.
-const XP_COOLDOWN_SECONDS = 60;
+const COOLDOWN = 60000; // 60 segundos en milisegundos
 // Final XP = XP_PER_MESSAGE + Min(MAX_XP_BONUS_FROM_LENGTH, Floor(message.length / XP_BONUS_PER_CHARS) * XP_BONUS_CHAR_UNIT)
 
 // --- LEVELING FORMULA CONFIGURATION ---
@@ -71,104 +72,34 @@ const roleRewards = [
 // --- END ROLE REWARDS CONFIGURATION ---
 
 /**
- * Obtiene los datos de un usuario específico.
- * @param {string} userId - ID del usuario.
- * @param {string} guildId - ID del servidor.
- * @returns {Promise<object>} Datos del usuario o estructura por defecto si no existe.
- */
-async function getUserData(userId, guildId) {
-    const db = getDatabase();
-    try {
-        const userData = await db.get(`
-            SELECT xp, level, messages_count, last_message_timestamp
-            FROM levels
-            WHERE user_id = ? AND guild_id = ?
-        `, [userId, guildId]);
-
-        if (userData) {
-            return {
-                ...userData,
-                userId,
-                guildId
-            };
-        }
-
-        // Crear nuevo usuario
-        await db.run(`
-            INSERT INTO levels (user_id, guild_id, xp, level, messages_count, last_message_timestamp)
-            VALUES (?, ?, 0, 0, 0, 0)
-        `, [userId, guildId]);
-
-        return {
-            userId,
-            guildId,
-            xp: 0,
-            level: 0,
-            messages_count: 0,
-            last_message_timestamp: 0
-        };
-    } catch (error) {
-        console.error('[Leveling System] Error al obtener datos del usuario:', error);
-        throw error;
-    }
-}
-
-/**
- * Actualiza los datos de un usuario.
- * @param {object} userData - Datos del usuario a actualizar.
- */
-async function updateUserData(userData) {
-    const db = getDatabase();
-    try {
-        await db.run(`
-            UPDATE levels
-            SET xp = ?, level = ?, messages_count = ?, last_message_timestamp = ?
-            WHERE user_id = ? AND guild_id = ?
-        `, [
-            userData.xp,
-            userData.level,
-            userData.messages_count,
-            userData.last_message_timestamp,
-            userData.userId,
-            userData.guildId
-        ]);
-    } catch (error) {
-        console.error('[Leveling System] Error al actualizar datos del usuario:', error);
-        throw error;
-    }
-}
-
-/**
  * Maneja un mensaje para otorgar XP al usuario.
  * @param {object} message - Objeto del mensaje de Discord.
  * @returns {Promise<object|null>} Datos actualizados del usuario o null si no se otorgó XP.
  */
 async function handleMessageForXP(message) {
-    if (message.author.bot) return null;
+    try {
+        const userData = getUserData(message.author.id, message.guild.id);
+        const now = Date.now();
 
-    const guildSettings = await getGuildSettings(message.guild.id);
-    const userData = await getUserData(message.author.id, message.guild.id);
-    const currentTime = Date.now();
+        // Verificar cooldown
+        if (now - userData.lastMessageTime < COOLDOWN) {
+            return false;
+        }
 
-    if ((currentTime - userData.last_message_timestamp) / 1000 < guildSettings.xp_cooldown_seconds) {
-        return null;
+        // Calcular bonus por longitud del mensaje
+        const lengthBonus = Math.min(
+            MAX_XP_BONUS_FROM_LENGTH,
+            Math.floor(message.content.length / XP_BONUS_PER_CHARS) * XP_BONUS_CHAR_UNIT
+        );
+
+        // Calcular nuevo XP
+        const newXP = userData.xp + XP_PER_MESSAGE + lengthBonus;
+        updateUserXP(message.author.id, message.guild.id, newXP, userData.level, now);
+        return true;
+    } catch (error) {
+        logger.error('Error al manejar XP:', error);
+        return false;
     }
-
-    let xpGained = guildSettings.xp_per_message;
-    const messageLengthBonus = Math.min(
-        Math.floor(message.content.length / 10),
-        5
-    );
-    xpGained += messageLengthBonus;
-
-    userData.xp += xpGained;
-    userData.messages_count = (userData.messages_count || 0) + 1;
-    userData.last_message_timestamp = currentTime;
-
-    await updateUserData(userData);
-    console.log(`[Leveling System] Usuario ${message.author.tag} ganó ${xpGained} XP. Total: ${userData.xp}`);
-
-    return userData;
 }
 
 /**
@@ -187,64 +118,40 @@ function getXpNeededForLevel(level) {
  * @param {object} userData - Datos actuales del usuario.
  * @returns {Promise<object>} Datos actualizados del usuario.
  */
-async function checkAndHandleLevelUp(message, userData) {
-    let currentLevel = userData.level;
-    let xpNeededForNextLevel = getXpNeededForLevel(currentLevel + 1);
-    let leveledUp = false;
+async function checkAndHandleLevelUp(message) {
+    try {
+        const userData = getUserData(message.author.id, message.guild.id);
+        const currentLevel = userData.level;
+        const xpForNextLevel = getXpNeededForLevel(currentLevel + 1);
 
-    while (userData.xp >= xpNeededForNextLevel) {
-        currentLevel++;
-        userData.level = currentLevel;
-        leveledUp = true;
+        if (userData.xp >= xpForNextLevel) {
+            const newLevel = currentLevel + 1;
+            updateUserXP(message.author.id, message.guild.id, userData.xp, newLevel, userData.lastMessageTime);
 
-        const guildSettings = await getGuildSettings(message.guild.id);
-        const randomEmoji = EMOJIS.NOTES[Math.floor(Math.random() * EMOJIS.NOTES.length)];
-        
-        // Crear un embed atractivo para la subida de nivel
-        const embed = new EmbedBuilder()
-            .setColor(COLORS.SPECIAL)
-            .setTitle(`${EMOJIS.LEVEL_UP} ¡Nivel Alcanzado! ${randomEmoji}`)
-            .setDescription(guildSettings.level_up_message
-                .replace('{user}', message.author)
-                .replace('{level}', userData.level))
-            .addFields(
-                { 
-                    name: `${EMOJIS.XP} Experiencia Total`,
-                    value: `${userData.xp} XP`,
-                    inline: true
-                },
-                {
-                    name: `${EMOJIS.MESSAGE} Mensajes Totales`,
-                    value: `${userData.messages_count}`,
-                    inline: true
-                }
-            )
-            .setThumbnail(message.author.displayAvatarURL())
-            .setTimestamp()
-            .setFooter({ 
-                text: `¡Sigue así! Siguiente nivel en ${getXpNeededForLevel(currentLevel + 1) - userData.xp} XP`,
-                iconURL: message.guild.iconURL()
-            });
-
-        try {
-            const channel = guildSettings.level_up_channel_id
-                ? await message.guild.channels.fetch(guildSettings.level_up_channel_id)
+            const settings = getGuildSettings(message.guild.id);
+            const announceChannel = settings.levelUpChannel 
+                ? message.guild.channels.cache.get(settings.levelUpChannel)
                 : message.channel;
 
-            await channel.send({ embeds: [embed] });
-        } catch (error) {
-            console.error(`[Leveling System] Error al enviar mensaje de nivel:`, error);
+            if (announceChannel) {
+                const embed = new EmbedBuilder()
+                    .setColor('#00ff00')
+                    .setTitle('¡Subida de Nivel! 🎉')
+                    .setDescription(`¡Felicidades ${message.author}! Has alcanzado el nivel **${newLevel}**`)
+                    .setThumbnail(message.author.displayAvatarURL())
+                    .setTimestamp();
+
+                await announceChannel.send({ embeds: [embed] });
+            }
+
+            return true;
         }
 
-        xpNeededForNextLevel = getXpNeededForLevel(currentLevel + 1);
+        return false;
+    } catch (error) {
+        logger.error('Error al verificar subida de nivel:', error);
+        return false;
     }
-
-    if (leveledUp) {
-        await updateUserData(userData);
-        await handleRoleRewards(message.member, userData);
-    }
-
-    return userData;
 }
 
 /**
@@ -252,73 +159,28 @@ async function checkAndHandleLevelUp(message, userData) {
  * @param {object} member - Objeto GuildMember de Discord.
  * @param {object} userData - Datos del usuario.
  */
-async function handleRoleRewards(member, userData) {
-    if (!member?.guild || !userData) return;
+async function handleRoleRewards(message) {
+    try {
+        const userData = getUserData(message.author.id, message.guild.id);
+        const roleRewards = getRoleRewards(message.guild.id);
 
-    if (!member.guild.members.me.permissions.has('ManageRoles')) {
-        console.error('[Role Rewards] El bot no tiene permisos para gestionar roles.');
-        return;
-    }
+        if (!roleRewards.length) return;
 
-    const levelRoles = await getLevelRoles(member.guild.id);
-    for (const reward of levelRoles) {
-        if (userData.level >= reward.level_required) {
-            if (member.roles.cache.has(reward.role_id)) continue;
-
-            const role = member.guild.roles.cache.get(reward.role_id);
-            if (!role) {
-                console.error(`[Role Rewards] Rol ${reward.role_id} no encontrado.`);
-                continue;
-            }
-
-            if (role.position >= member.guild.members.me.roles.highest.position) {
-                console.error(`[Role Rewards] No se puede asignar el rol "${role.name}".`);
-                continue;
-            }
-
-            try {
-                await member.roles.add(role);
-                console.log(`[Role Rewards] ${member.user.tag} recibió el rol "${role.name}"`);
-
-                // Crear embed para la recompensa de rol
-                const rewardEmbed = new EmbedBuilder()
-                    .setColor(COLORS.SUCCESS)
-                    .setTitle(`${EMOJIS.REWARD} ¡Nueva Recompensa Desbloqueada!`)
-                    .setDescription(`¡Felicidades! Has alcanzado el nivel ${reward.level_required} y has desbloqueado un nuevo rol.`)
-                    .addFields(
-                        { 
-                            name: `${EMOJIS.TROPHY} Rol Obtenido`,
-                            value: `${role.name}`,
-                            inline: true
-                        },
-                        {
-                            name: `${EMOJIS.LEVEL} Nivel Requerido`,
-                            value: `${reward.level_required}`,
-                            inline: true
-                        }
-                    )
-                    .setThumbnail(member.user.displayAvatarURL())
-                    .setTimestamp()
-                    .setFooter({ 
-                        text: `¡Sigue participando para desbloquear más recompensas!`,
-                        iconURL: member.guild.iconURL()
-                    });
-
-                try {
-                    await member.send({ embeds: [rewardEmbed] });
-                } catch (dmError) {
-                    console.log(`[Role Rewards] No se pudo enviar DM a ${member.user.tag}`);
+        for (const reward of roleRewards) {
+            if (userData.level >= reward.level) {
+                const role = message.guild.roles.cache.get(reward.roleId);
+                if (role && !message.member.roles.cache.has(role.id)) {
+                    await message.member.roles.add(role);
+                    await message.channel.send(`🎭 ¡${message.author} ha desbloqueado el rol **${role.name}**!`);
                 }
-            } catch (error) {
-                console.error(`[Role Rewards] Error al añadir rol "${role.name}":`, error);
             }
         }
+    } catch (error) {
+        logger.error('Error al manejar recompensas de roles:', error);
     }
 }
 
 export {
-    getUserData,
-    updateUserData,
     handleMessageForXP,
     checkAndHandleLevelUp,
     handleRoleRewards,

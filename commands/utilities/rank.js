@@ -1,6 +1,5 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
-import { getDatabase } from '../../database.js';
-import { getXpNeededForLevel } from '../../features/levelingSystem.js';
+import { getUserData } from '../../utils/storage.js';
 
 // Constantes para emojis y colores
 const EMOJIS = {
@@ -32,117 +31,36 @@ const COLORS = {
 
 export const data = new SlashCommandBuilder()
     .setName('rank')
-    .setDescription('Muestra tu rango y nivel actual')
+    .setDescription('Muestra tu nivel y experiencia actual')
     .addUserOption(option =>
         option.setName('usuario')
             .setDescription('Usuario del que quieres ver el rango (opcional)'));
 
 export async function execute(interaction) {
-    try {
-        const targetUser = interaction.options.getUser('usuario') || interaction.user;
-        const db = getDatabase();
+    const targetUser = interaction.options.getUser('usuario') || interaction.user;
+    const userData = getUserData(targetUser.id, interaction.guildId);
 
-        // Obtener datos del usuario
-        const userData = await db.get(`
-            SELECT xp, level, messages_count
-            FROM levels
-            WHERE user_id = ? AND guild_id = ?
-        `, [targetUser.id, interaction.guild.id]);
+    const nextLevelXP = Math.floor(100 * Math.pow(1.2, userData.level));
+    const progressPercent = Math.floor((userData.xp / nextLevelXP) * 100);
+    const progressBar = createProgressBar(progressPercent);
 
-        if (!userData) {
-            return interaction.reply({
-                content: targetUser.id === interaction.user.id
-                    ? `${EMOJIS.ERROR} Aún no tienes ningún nivel. ¡Comienza a chatear para ganar XP!`
-                    : `${EMOJIS.ERROR} ${targetUser.username} aún no tiene ningún nivel.`,
-                ephemeral: true
-            });
-        }
+    const embed = new EmbedBuilder()
+        .setColor('#0099ff')
+        .setTitle(`Rango de ${targetUser.username}`)
+        .setThumbnail(targetUser.displayAvatarURL())
+        .addFields(
+            { name: '📊 Nivel', value: userData.level.toString(), inline: true },
+            { name: '⭐ XP', value: `${userData.xp}/${nextLevelXP}`, inline: true },
+            { name: '📈 Progreso', value: progressBar }
+        )
+        .setFooter({ text: `${progressPercent}% completado para el siguiente nivel` })
+        .setTimestamp();
 
-        // Obtener posición en el ranking
-        const rankings = await db.all(`
-            SELECT user_id, xp
-            FROM levels
-            WHERE guild_id = ?
-            ORDER BY xp DESC
-        `, [interaction.guild.id]);
+    await interaction.reply({ embeds: [embed] });
+}
 
-        const rank = rankings.findIndex(user => user.user_id === targetUser.id) + 1;
-
-        // Calcular progreso al siguiente nivel
-        const currentLevelXp = getXpNeededForLevel(userData.level);
-        const nextLevelXp = getXpNeededForLevel(userData.level + 1);
-        const xpForNextLevel = nextLevelXp - currentLevelXp;
-        const currentXpInLevel = userData.xp - currentLevelXp;
-        const progressPercentage = Math.floor((currentXpInLevel / xpForNextLevel) * 100);
-
-        // Crear barra de progreso mejorada
-        const progressBarLength = 20;
-        const filledBlocks = Math.floor((progressPercentage / 100) * progressBarLength);
-        const progressBar = EMOJIS.BAR.START.repeat(filledBlocks) + EMOJIS.BAR.END.repeat(progressBarLength - filledBlocks);
-
-        // Determinar medalla basada en el rango
-        let rankMedal;
-        let embedColor;
-        switch (rank) {
-            case 1:
-                rankMedal = EMOJIS.MEDAL.FIRST;
-                embedColor = COLORS.GOLD;
-                break;
-            case 2:
-                rankMedal = EMOJIS.MEDAL.SECOND;
-                embedColor = COLORS.GOLD;
-                break;
-            case 3:
-                rankMedal = EMOJIS.MEDAL.THIRD;
-                embedColor = COLORS.GOLD;
-                break;
-            default:
-                rankMedal = EMOJIS.MEDAL.OTHER;
-                embedColor = rank <= 10 ? COLORS.SILVER : COLORS.BRONZE;
-        }
-
-        const embed = new EmbedBuilder()
-            .setColor(embedColor)
-            .setAuthor({
-                name: `Perfil de ${targetUser.username}`,
-                iconURL: targetUser.displayAvatarURL()
-            })
-            .setDescription(`${rankMedal} Ranking **#${rank}** en el servidor`)
-            .addFields(
-                { 
-                    name: `${EMOJIS.LEVEL} Nivel`,
-                    value: `\`${userData.level}\``,
-                    inline: true 
-                },
-                { 
-                    name: `${EMOJIS.XP} XP Total`,
-                    value: `\`${userData.xp}\``,
-                    inline: true 
-                },
-                { 
-                    name: `${EMOJIS.MESSAGE} Mensajes`,
-                    value: `\`${userData.messages_count}\``,
-                    inline: true 
-                },
-                {
-                    name: `${EMOJIS.PROGRESS} Progreso al siguiente nivel`,
-                    value: `${progressBar} \`${progressPercentage}%\`\n` +
-                          `\`${currentXpInLevel}/${xpForNextLevel} XP\``
-                }
-            )
-            .setTimestamp()
-            .setFooter({ 
-                text: `${EMOJIS.NEXT} ${xpForNextLevel - currentXpInLevel} XP restante para el nivel ${userData.level + 1}`,
-                iconURL: interaction.guild.iconURL()
-            });
-
-        await interaction.reply({ embeds: [embed] });
-
-    } catch (error) {
-        console.error('[Rank] Error:', error);
-        await interaction.reply({
-            content: `${EMOJIS.ERROR} Ocurrió un error al obtener la información de rango.`,
-            ephemeral: true
-        });
-    }
+function createProgressBar(percent) {
+    const filledBlocks = Math.floor(percent / 10);
+    const emptyBlocks = 10 - filledBlocks;
+    return '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks);
 } 

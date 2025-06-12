@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
-import { getDatabase } from '../../database.js';
+import { getUserData } from '../../utils/storage.js';
 
 // Constantes para emojis y colores
 const EMOJIS = {
@@ -29,109 +29,48 @@ const COLORS = {
 
 export const data = new SlashCommandBuilder()
     .setName('leaderboard')
-    .setDescription('Muestra la tabla de clasificación del servidor')
-    .addIntegerOption(option =>
-        option.setName('página')
-            .setDescription('Número de página a mostrar')
-            .setMinValue(1));
+    .setDescription('Muestra la tabla de clasificación del servidor');
 
 export async function execute(interaction) {
     try {
-        const page = interaction.options.getInteger('página') || 1;
-        const usersPerPage = 10;
-        const db = getDatabase();
+        // Obtener todos los miembros del servidor
+        const members = await interaction.guild.members.fetch();
+        
+        // Obtener datos de XP de cada miembro
+        const userDataArray = members.map(member => ({
+            ...getUserData(member.id, interaction.guildId),
+            user: member.user
+        }));
 
-        // Obtener total de usuarios con nivel
-        const totalUsers = await db.get(`
-            SELECT COUNT(*) as count
-            FROM levels
-            WHERE guild_id = ?
-        `, [interaction.guild.id]);
+        // Ordenar por XP
+        const sortedUsers = userDataArray
+            .sort((a, b) => b.xp - a.xp)
+            .slice(0, 10);
 
-        const maxPages = Math.ceil(totalUsers.count / usersPerPage);
-
-        if (page > maxPages) {
-            return interaction.reply({
-                content: `${EMOJIS.ERROR} Solo hay ${maxPages} página${maxPages === 1 ? '' : 's'} disponible${maxPages === 1 ? '' : 's'}.`,
-                ephemeral: true
-            });
-        }
-
-        // Obtener usuarios para la página actual
-        const offset = (page - 1) * usersPerPage;
-        const rankings = await db.all(`
-            SELECT user_id, xp, level, messages_count
-            FROM levels
-            WHERE guild_id = ?
-            ORDER BY xp DESC
-            LIMIT ? OFFSET ?
-        `, [interaction.guild.id, usersPerPage, offset]);
-
-        if (rankings.length === 0) {
-            return interaction.reply({
-                content: `${EMOJIS.ERROR} Aún no hay usuarios con nivel en este servidor.`,
-                ephemeral: true
-            });
-        }
-
-        // Construir la lista de usuarios con formato mejorado
-        let description = '';
-        for (let i = 0; i < rankings.length; i++) {
-            const rank = offset + i + 1;
-            const user = rankings[i];
-            let userMention;
-            try {
-                const member = await interaction.guild.members.fetch(user.user_id);
-                userMention = member.toString();
-            } catch {
-                userMention = `Usuario Desconocido (${user.user_id})`;
-            }
-
-            // Determinar el emoji de rango
-            let rankEmoji;
-            switch (rank) {
-                case 1:
-                    rankEmoji = EMOJIS.MEDAL.FIRST;
-                    break;
-                case 2:
-                    rankEmoji = EMOJIS.MEDAL.SECOND;
-                    break;
-                case 3:
-                    rankEmoji = EMOJIS.MEDAL.THIRD;
-                    break;
-                default:
-                    rankEmoji = `\`#${rank}\``;
-            }
-
-            description += `${rankEmoji} ${userMention}\n` +
-                `┣ ${EMOJIS.LEVEL} Nivel \`${user.level}\` ` +
-                `${EMOJIS.XP} \`${user.xp}\` XP ` +
-                `${EMOJIS.MESSAGE} \`${user.messages_count}\` mensajes\n` +
-                `┗━━━━━━━━━━━━━━━━━━\n`;
-        }
-
+        // Crear el embed
         const embed = new EmbedBuilder()
-            .setColor(COLORS.GOLD)
-            .setTitle(`${EMOJIS.TROPHY} Tabla de Clasificación ${EMOJIS.SPARKLES}`)
-            .setDescription(description)
+            .setColor('#0099ff')
+            .setTitle('🏆 Tabla de Clasificación')
+            .setDescription('Los 10 usuarios con más XP en el servidor')
             .setThumbnail(interaction.guild.iconURL())
-            .addFields({
-                name: `${EMOJIS.CHART} Estadísticas`,
-                value: `Total de usuarios: \`${totalUsers.count}\`\n` +
-                      `Página \`${page}/${maxPages}\``
+            .setTimestamp();
+
+        // Añadir los usuarios al embed
+        const leaderboardText = sortedUsers
+            .map((userData, index) => {
+                const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '🏅';
+                return `${medal} **${index + 1}.** ${userData.user.toString()}
+                       Nivel: ${userData.level} • XP: ${userData.xp}`;
             })
-            .setTimestamp()
-            .setFooter({ 
-                text: `Usa /leaderboard <página> para ver más clasificaciones`,
-                iconURL: interaction.guild.iconURL()
-            });
+            .join('\n\n');
+
+        embed.setDescription(leaderboardText || 'No hay usuarios en la clasificación.');
 
         await interaction.reply({ embeds: [embed] });
-
     } catch (error) {
-        console.error('[Leaderboard] Error:', error);
+        console.error('Error al obtener la tabla de clasificación:', error);
         await interaction.reply({
-            content: `${EMOJIS.ERROR} Ocurrió un error al obtener la tabla de clasificación.`,
+            content: '❌ Hubo un error al obtener la tabla de clasificación.',
             ephemeral: true
         });
     }
