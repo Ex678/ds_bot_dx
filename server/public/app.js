@@ -1,93 +1,156 @@
 window.addEventListener('load', async () => {
-    const userStatusDiv = document.getElementById('user-status');
-    const loginButton = document.getElementById('login-button');
-    const logoutButtonPlaceholder = document.getElementById('logout-button-placeholder'); // Assuming a placeholder for a dedicated logout button
-    const guildsListDiv = document.getElementById('guilds-list');
-    const automodRulesSection = document.getElementById('automod-rules-section');
+    // Initial element fetching - these are assumed to exist from index.html
+    const initialUserStatusDiv = document.getElementById('user-status');
+    const initialLoginButton = document.getElementById('login-button'); // Static login button from HTML
+    const logoutButtonPlaceholder = document.getElementById('logout-button-placeholder');
+    const initialGuildsListDiv = document.getElementById('guilds-list');
+    const initialAutomodRulesSection = document.getElementById('automod-rules-section');
     const automodGuildName = document.getElementById('automod-guild-name');
     const automodRulesForm = document.getElementById('automod-rules-form');
-    const saveButton = document.getElementById('save-automod-rules');
+    const initialSaveButton = document.getElementById('save-automod-rules');
 
     let currentGuildId = null;
 
-    // Helper to ensure elements exist before manipulating
-    const ensureElement = (id) => {
-        let el = document.getElementById(id);
-        if (!el) {
-            console.warn(`Element with ID '${id}' not found. Creating a placeholder.`);
-            el = document.createElement('div'); // Or button, etc.
-            el.id = id;
-            // You might want to append it somewhere visible for debugging if it's critical
-            // document.body.appendChild(el);
-        }
-        return el;
-    };
-
-    // Re-assign using the helper to be safe, though ideally they exist
-    // const userStatusDiv = ensureElement('user-status');
-    // const loginButton = ensureElement('login-button');
-    // etc. for other critical elements if they might be missing.
-    // For this implementation, we'll assume the subtask that created index.html made them.
+    // Helper (not strictly needed for this task as elements are fetched once, but good for thought)
+    // const ensureElement = (id) => document.getElementById(id);
 
     async function checkLoginStatus() {
         try {
             const response = await fetch('/api/me');
             console.log('Respuesta de /api/me:', response.status, response.statusText);
 
-            // Default UI state: not logged in
-            if (loginButton) loginButton.style.display = 'block';
-            if (logoutButtonPlaceholder) logoutButtonPlaceholder.innerHTML = ''; // Clear any old logout button
-            if (guildsListDiv) guildsListDiv.style.display = 'none';
-            if (automodRulesSection) automodRulesSection.style.display = 'none';
-            if (saveButton) saveButton.style.display = 'none';
+            // Default UI state: prepare for not logged in, but don't assume yet
+            // We will explicitly set visibility based on response.
+            // Hide sections that depend on login or guild selection by default.
+            if (initialGuildsListDiv) initialGuildsListDiv.style.display = 'none';
+            if (initialAutomodRulesSection) initialAutomodRulesSection.style.display = 'none';
+            if (initialSaveButton) initialSaveButton.style.display = 'none';
+            if (logoutButtonPlaceholder) logoutButtonPlaceholder.innerHTML = '';
+
 
             if (response.ok) {
                 const user = await response.json();
+                const userStatusDiv = document.getElementById('user-status'); // Re-fetch for safety, or use initialUserStatusDiv
                 if (userStatusDiv) {
                     userStatusDiv.innerHTML = `<p>Logueado como: ${user.username}#${user.discriminator}</p>`;
                 }
-                if (loginButton) loginButton.style.display = 'none';
-                if (logoutButtonPlaceholder) {
+
+                const loginButton = document.getElementById('login-button'); // Re-fetch or use initialLoginButton
+                if (loginButton) loginButton.style.display = 'none'; // Hide static login button
+
+                if (logoutButtonPlaceholder) { // Use the placeholder for the logout button
                      logoutButtonPlaceholder.innerHTML = `<button onclick="window.location.href='/auth/logout'">Logout</button>`;
+                } else if (userStatusDiv) { // Fallback if placeholder doesn't exist, append to userStatusDiv
+                    userStatusDiv.innerHTML += ` <button onclick="window.location.href='/auth/logout'">Logout</button>`;
                 }
+
+
+                const guildsListDiv = document.getElementById('guilds-list'); // Re-fetch or use initialGuildsListDiv
                 if (guildsListDiv) {
                     guildsListDiv.style.display = 'block';
                     loadGuilds(user.guilds);
                 }
             } else if (response.status === 401) {
-                console.log('Detectado 401, mostrando botón de login.');
-                if (userStatusDiv) {
-                     userStatusDiv.innerHTML = "<p>No estás logueado. Por favor, inicia sesión para gestionar tus servidores.</p>";
-                }
-                // Login button should already be visible from default UI state above
-                // Clear sensitive data areas
-                if (guildsListDiv) guildsListDiv.innerHTML = '';
-                if (automodRulesForm) automodRulesForm.innerHTML = '';
+                // --- Start of the new detailed 401 block ---
+                console.log('Detectado 401. Intentando modificar user-status.');
+                const userStatusDiv = document.getElementById('user-status'); // Re-fetch critical element
 
-            } else {
+                if (userStatusDiv) {
+                    console.log('user-status div ENCONTRADO. Modificando innerHTML...');
+                    // Note: inline onclick is generally not recommended vs addEventListener, but for this specific debug injection:
+                    userStatusDiv.innerHTML = '<p>No estás logueado.</p><button id="login-button-dinamico" onclick="window.location.href=\'/auth/discord\'">Login con Discord (Dinámico)</button>';
+
+                    const botonCreado = document.getElementById('login-button-dinamico');
+                    if (botonCreado) {
+                        console.log('Botón DINÁMICO añadido al DOM y encontrado.');
+                    } else {
+                        console.error('ERROR: Botón dinámico NO encontrado en el DOM después de innerHTML.');
+                        console.log('Contenido de userStatusDiv.innerHTML AHORA:', userStatusDiv.innerHTML);
+                    }
+                } else {
+                    console.error('ERROR CRÍTICO: user-status div NO encontrado en el DOM en el bloque 401.');
+                }
+
+                // Hide other sections safely
+                const guildsListDiv = document.getElementById('guilds-list'); // Re-fetch
+                if (guildsListDiv) {
+                    guildsListDiv.innerHTML = '';
+                    guildsListDiv.style.display = 'none';
+                }
+                const automodRulesSection = document.getElementById('automod-rules-section'); // Re-fetch
+                if (automodRulesSection) automodRulesSection.style.display = 'none';
+                const saveButton = document.getElementById('save-automod-rules'); // Re-fetch
+                if (saveButton) saveButton.style.display = 'none';
+
+                // Clear logout button if it was somehow populated
+                if (logoutButtonPlaceholder) logoutButtonPlaceholder.innerHTML = '';
+
+
+                // Handling the static login button from HTML (id="login-button")
+                const staticLoginButton = document.getElementById('login-button');
+                if (staticLoginButton) { // If a static button with id="login-button" exists
+                    console.log('Manejando botón de login estático (login-button)...');
+                    // If userStatusDiv is successfully updated with a dynamic button,
+                    // the static one might be redundant or confusing.
+                    // If the dynamic button creation failed, the static one might be the only way to log in.
+                    if (userStatusDiv && document.getElementById('login-button-dinamico')) {
+                        // Dynamic button exists, hide the static one to prevent confusion
+                        staticLoginButton.style.display = 'none';
+                        console.log('Botón dinámico existe, ocultando botón estático.');
+                    } else {
+                        // Dynamic button doesn't exist (or userStatusDiv doesn't), ensure static one is visible as fallback
+                        staticLoginButton.style.display = 'block';
+                        console.log('Botón dinámico NO existe (o userStatusDiv no), mostrando botón estático como fallback.');
+                    }
+                } else {
+                    console.log('Botón de login estático (login-button) NO encontrado en el DOM.');
+                }
+                // --- End of the new detailed 401 block ---
+
+            } else { // Handle other non-OK, non-401 server errors
                 const errorText = await response.text();
                 console.error('Error del servidor al verificar login:', response.status, errorText);
+                const userStatusDiv = document.getElementById('user-status');
                 if (userStatusDiv) userStatusDiv.innerHTML = `<p>Error al verificar el estado de login: ${response.status}. ${errorText}. Intenta recargar.</p>`;
-                if (guildsListDiv) guildsListDiv.innerHTML = '';
-                if (automodRulesForm) automodRulesForm.innerHTML = '';
+
+                // Hide everything else, ensure no login button confusion
+                const guildsListDiv = document.getElementById('guilds-list');
+                if (guildsListDiv) { guildsListDiv.innerHTML = ''; guildsListDiv.style.display = 'none'; }
+                const automodRulesSection = document.getElementById('automod-rules-section');
+                if (automodRulesSection) automodRulesSection.style.display = 'none';
+                const saveButton = document.getElementById('save-automod-rules');
+                if (saveButton) saveButton.style.display = 'none';
+                const loginButton = document.getElementById('login-button');
+                if (loginButton) loginButton.style.display = 'none'; // Hide static login button on server error
+                if (logoutButtonPlaceholder) logoutButtonPlaceholder.innerHTML = '';
+
             }
-        } catch (error) {
+        } catch (error) { // Network errors or JS errors during the try block
             console.error('Error de red o JS en checkLoginStatus:', error);
+            const userStatusDiv = document.getElementById('user-status');
             if (userStatusDiv) userStatusDiv.innerHTML = '<p>Error al conectar con el servidor. Verifica tu conexión e intenta recargar.</p>';
-            if (loginButton && loginButton.style.display !== 'block') { // Show login if hidden
-                 loginButton.style.display = 'block';
-            }
-            if (guildsListDiv) {
-                guildsListDiv.innerHTML = '';
-                guildsListDiv.style.display = 'none';
-            }
+
+            // Show static login button as a possible recovery action
+            const loginButton = document.getElementById('login-button');
+            if (loginButton) loginButton.style.display = 'block';
+
+            // Hide other sections
+            const guildsListDiv = document.getElementById('guilds-list');
+            if (guildsListDiv) { guildsListDiv.innerHTML = ''; guildsListDiv.style.display = 'none';}
+            const automodRulesSection = document.getElementById('automod-rules-section');
             if (automodRulesSection) automodRulesSection.style.display = 'none';
+            const saveButton = document.getElementById('save-automod-rules');
             if (saveButton) saveButton.style.display = 'none';
+            if (logoutButtonPlaceholder) logoutButtonPlaceholder.innerHTML = '';
         }
     }
 
     function loadGuilds(guilds) {
-        if (!guildsListDiv) return;
+        const guildsListDiv = document.getElementById('guilds-list');
+        if (!guildsListDiv) {
+            console.error("Elemento guilds-list no encontrado en loadGuilds.");
+            return;
+        }
         guildsListDiv.innerHTML = '<h3>Tus Servidores (Admin):</h3>';
         const ul = document.createElement('ul');
 
@@ -110,12 +173,21 @@ window.addEventListener('load', async () => {
 
     async function loadAutoModRules(guildId, guildName) {
         currentGuildId = guildId;
-        if (!automodRulesSection || !automodGuildName || !automodRulesForm || !saveButton) return;
+        // Re-fetch elements here as well, or pass them, or use initially fetched ones if guaranteed to exist.
+        const automodRulesSectionElem = document.getElementById('automod-rules-section');
+        const automodGuildNameElem = document.getElementById('automod-guild-name');
+        const automodRulesFormElem = document.getElementById('automod-rules-form');
+        const saveButtonElem = document.getElementById('save-automod-rules');
 
-        automodGuildName.textContent = `Configurando AutoMod para: ${guildName}`;
-        automodRulesSection.style.display = 'block';
-        saveButton.style.display = 'block';
-        automodRulesForm.innerHTML = '<p>Cargando reglas...</p>';
+        if (!automodRulesSectionElem || !automodGuildNameElem || !automodRulesFormElem || !saveButtonElem) {
+            console.error("Faltan elementos del DOM en loadAutoModRules.");
+            return;
+        }
+
+        automodGuildNameElem.textContent = `Configurando AutoMod para: ${guildName}`;
+        automodRulesSectionElem.style.display = 'block';
+        saveButtonElem.style.display = 'block';
+        automodRulesFormElem.innerHTML = '<p>Cargando reglas...</p>';
 
         try {
             const response = await fetch(`/api/guilds/${guildId}/automod/rules`);
@@ -126,13 +198,17 @@ window.addEventListener('load', async () => {
             renderAutoModForm(rules);
         } catch (error) {
             console.error('Error en loadAutoModRules:', error);
-            automodRulesForm.innerHTML = `<p>Error al cargar reglas: ${error.message}</p>`;
+            if (automodRulesFormElem) automodRulesFormElem.innerHTML = `<p>Error al cargar reglas: ${error.message}</p>`;
         }
     }
 
     function renderAutoModForm(rulesData) {
-        if (!automodRulesForm) return;
-        automodRulesForm.innerHTML = ''; // Clear previous form or loading message
+        const automodRulesFormElem = document.getElementById('automod-rules-form');
+        if (!automodRulesFormElem) {
+            console.error("Elemento automod-rules-form no encontrado en renderAutoModForm.");
+            return;
+        }
+        automodRulesFormElem.innerHTML = '';
 
         const knownRules = {
             banned_words: { label: 'Palabras Prohibidas (separadas por coma)', type: 'textarea' },
@@ -141,14 +217,12 @@ window.addEventListener('load', async () => {
             anti_link: { label: 'Anti-Enlaces (lista blanca de dominios separados por coma, ej: youtube.com,google.com. Dejar vacío para bloquear todos los enlaces excepto los de la lista blanca. Si no se define esta regla, todos los enlaces son permitidos)', type: 'textarea' }
         };
 
-        // Create a mapping from rule_type to rule_value for easy lookup
         const currentRules = {};
         if (Array.isArray(rulesData)) {
             rulesData.forEach(rule => {
                 currentRules[rule.rule_type] = rule.rule_value;
             });
         }
-
 
         for (const ruleKey in knownRules) {
             const ruleConfig = knownRules[ruleKey];
@@ -173,21 +247,22 @@ window.addEventListener('load', async () => {
             input.value = currentRules[ruleKey] || (ruleConfig.type === 'number' ? '0' : '');
 
             div.appendChild(input);
-            automodRulesForm.appendChild(div);
+            automodRulesFormElem.appendChild(div);
         }
     }
 
-    if (saveButton) {
-        saveButton.onclick = async () => {
-            if (!currentGuildId || !automodRulesForm) return;
+    const saveButtonElem = document.getElementById('save-automod-rules');
+    if (saveButtonElem) {
+        saveButtonElem.onclick = async () => {
+            const automodRulesFormElem = document.getElementById('automod-rules-form');
+            if (!currentGuildId || !automodRulesFormElem) {
+                console.error("Falta currentGuildId o automodRulesFormElem en saveButton.onclick");
+                return;
+            }
 
-            const formData = new FormData(automodRulesForm); // This won't work directly for our dynamically created form
             const updatedRules = {};
-
-            // Iterate over the inputs in the form
-            const inputs = automodRulesForm.querySelectorAll('input, textarea');
+            const inputs = automodRulesFormElem.querySelectorAll('input, textarea');
             inputs.forEach(input => {
-                // Only include rules that have a value or are numbers (to allow setting to 0)
                 if (input.value.trim() !== '' || input.type === 'number') {
                     updatedRules[input.name] = input.value.trim();
                 }
@@ -204,13 +279,13 @@ window.addEventListener('load', async () => {
                     throw new Error(result.error || `Error al guardar: ${response.statusText}`);
                 }
                 alert('Reglas guardadas exitosamente!');
-                // Optionally, reload rules to confirm
-                // loadAutoModRules(currentGuildId, automodGuildName.textContent.replace('Configurando AutoMod para: ', ''));
             } catch (error) {
                 console.error('Error en saveButton.onclick:', error);
                 alert(`Error al guardar reglas: ${error.message}`);
             }
         };
+    } else {
+        console.warn("Botón save-automod-rules no encontrado al asignar evento onclick.");
     }
 
     // Initial check
