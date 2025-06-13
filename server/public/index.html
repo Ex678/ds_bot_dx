@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord Bot Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Discord Bot Dashboard</h1>
+
+    <div id="user-status">
+        <p>Loading user information...</p>
+        <button id="login-button" style="display: none;">Login with Discord</button>
+    </div>
+
+    <h2>Your Admin Guilds:</h2>
+    <div id="guilds-list">
+        <!-- Guilds will be populated here by app.js -->
+    </div>
+
+    <div id="automod-rules-section" style="display: none;">
+        <h2 id="automod-guild-name">AutoMod Rules for [Guild Name]</h2>
+        <div id="automod-rules-form">
+            <!-- AutoMod rules form/display will be populated here -->
+        </div>
+        <button id="save-automod-rules" style="display: none;">Save Changes</button>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
