@@ -1,5 +1,8 @@
 import { Events } from 'discord.js';
-import { checkAutoMod, addStrike, logModAction, createModActionEmbed } from '../utils/moderation.js';
+// Updated import to use checkMessage, assuming other functions like addStrike, logModAction might be deprecated if checkMessage handles all.
+// For now, keep them if other parts of the bot use them, but messageAutoMod will simplify.
+import { checkMessage, addStrike, logModAction, createModActionEmbed } from '../utils/moderation.js';
+import logger from '../utils/logger.js'; // Assuming logger is preferred for console output
 
 export const name = Events.MessageCreate;
 export const once = false;
@@ -8,149 +11,50 @@ export async function execute(message) {
     // Ignorar mensajes de bots y DMs
     if (message.author.bot || !message.guild) return;
 
+    console.log(`[messageAutoMod] Mensaje recibido de ${message.author.tag} en #${message.channel.name} de ${message.guild.name}: "${message.content}"`);
+
     try {
-        const violation = await checkAutoMod(message);
-        
-        if (violation) {
-            const { rule, violation: violationDetails } = violation;
-            
-            // Aplicar acción según la regla
-            switch (rule.action) {
-                case 'DELETE':
-                    await message.delete();
-                    break;
+        // Call checkMessage which now handles its own logging and actions (delete, send message)
+        // It returns true if an infraction was found and handled, false otherwise.
+        const infractionHandled = checkMessage(message); // checkMessage is synchronous
 
-                case 'WARN':
-                    const strikeResult = await addStrike(
-                        message.guild.id,
-                        message.author.id,
-                        message.client.user.id,
-                        `Violación de regla ${rule.rule_type}`
-                    );
+        if (infractionHandled) {
+            console.log(`[messageAutoMod] Infracción detectada y manejada por checkMessage para el mensaje de ${message.author.tag}.`);
+            // At this point, checkMessage has already deleted the message and sent a warning to the channel.
+            // The extensive logic for addStrike, logModAction, sending embeds, etc., that was here previously
+            // might be redundant if checkMessage's direct actions are sufficient.
 
-                    await logModAction({
-                        guildId: message.guild.id,
-                        userId: message.author.id,
-                        moderatorId: message.client.user.id,
-                        actionType: 'WARN',
-                        reason: `Auto-moderación: Violación de regla ${rule.rule_type}`
-                    });
+            // If a more advanced logging or strike system is still desired *on top of* checkMessage's actions,
+            // then checkMessage would need to be refactored to return rule violation details
+            // instead of just true/false and acting directly.
 
-                    // Si el strike resulta en una acción adicional
-                    if (strikeResult.action) {
-                        switch (strikeResult.action) {
-                            case 'MUTE':
-                                // Implementar mute
-                                const muteRole = message.guild.roles.cache.find(role => role.name === 'Muted');
-                                if (muteRole) {
-                                    await message.member.roles.add(muteRole);
-                                    setTimeout(() => {
-                                        message.member.roles.remove(muteRole).catch(console.error);
-                                    }, strikeResult.duration * 1000);
-                                }
-                                break;
+            // For the purpose of this task, we assume checkMessage's actions are the primary ones.
+            // Further actions like logging to a mod-log channel could still be done here if needed,
+            // but would require checkMessage to return info about which rule was violated.
 
-                            case 'KICK':
-                                await message.member.kick(`Auto-moderación: Alcanzado límite de strikes`);
-                                break;
-
-                            case 'BAN':
-                                await message.member.ban({
-                                    reason: `Auto-moderación: Alcanzado límite de strikes`
-                                });
-                                break;
-                        }
-
-                        await logModAction({
-                            guildId: message.guild.id,
-                            userId: message.author.id,
-                            moderatorId: message.client.user.id,
-                            actionType: strikeResult.action,
-                            reason: `Auto-moderación: Alcanzado límite de strikes`,
-                            duration: strikeResult.duration
-                        });
-                    }
-
-                    // Notificar al usuario
-                    const warningEmbed = createModActionEmbed({
-                        title: '⚠️ Advertencia',
-                        description: `Has recibido una advertencia por violar las reglas del servidor.\nRegla: ${rule.rule_type}`,
-                        fields: [
-                            {
-                                name: '📝 Detalles',
-                                value: `Strikes totales: ${strikeResult.totalStrikes}`,
-                                inline: true
-                            }
-                        ],
-                        color: 0xFFA500
-                    });
-
-                    await message.author.send({ embeds: [warningEmbed] }).catch(() => {
-                        // Si no se puede enviar DM, enviar en el canal
-                        message.channel.send({ embeds: [warningEmbed] });
-                    });
-                    break;
-
-                case 'MUTE':
-                    const muteRole = message.guild.roles.cache.find(role => role.name === 'Muted');
-                    if (muteRole) {
-                        await message.member.roles.add(muteRole);
-                        setTimeout(() => {
-                            message.member.roles.remove(muteRole).catch(console.error);
-                        }, 3600000); // 1 hora por defecto
-                    }
-                    break;
-
-                case 'KICK':
-                    await message.member.kick(`Auto-moderación: Violación de regla ${rule.rule_type}`);
-                    break;
-
-                case 'BAN':
-                    await message.member.ban({
-                        reason: `Auto-moderación: Violación de regla ${rule.rule_type}`
-                    });
-                    break;
-            }
-
-            // Log de la acción
+            // Example: If you still want to log to a mod-log channel (assuming checkMessage doesn't do this)
+            // This part would require checkMessage to return which rule was violated.
+            // For now, this is commented out as checkMessage doesn't return rule details.
+            /*
             const logChannel = message.guild.channels.cache.find(
-                channel => channel.name === 'mod-logs'
+                channel => channel.name === 'mod-logs' // Or get from config
             );
-
             if (logChannel) {
-                const logEmbed = createModActionEmbed({
-                    title: '🛡️ Acción de Auto-Moderación',
-                    description: `Se ha detectado una violación de reglas.`,
+                const logEmbed = createModActionEmbed({ // createModActionEmbed might still be useful
+                    title: '🛡️ Acción de Auto-Moderación (Info)',
+                    description: `checkMessage manejó una infracción.`,
                     fields: [
-                        {
-                            name: '👤 Usuario',
-                            value: `${message.author.tag} (${message.author.id})`,
-                            inline: true
-                        },
-                        {
-                            name: '📜 Regla',
-                            value: rule.rule_type,
-                            inline: true
-                        },
-                        {
-                            name: '⚡ Acción',
-                            value: rule.action,
-                            inline: true
-                        },
-                        {
-                            name: '💬 Mensaje',
-                            value: message.content.length > 1024 
-                                ? message.content.substring(0, 1021) + '...'
-                                : message.content || '[No hay contenido de texto]'
-                        }
+                        { name: '👤 Usuario', value: `${message.author.tag} (${message.author.id})`, inline: true },
+                        { name: 'ቻ Mensaje Original', value: message.content.length > 1024 ? message.content.substring(0, 1021) + '...' : message.content || '[No hay contenido de texto]', inline: false }
                     ],
-                    color: 0xFF0000
+                    color: 0xFF0000 // Red for infractions
                 });
-
                 await logChannel.send({ embeds: [logEmbed] });
             }
+            */
         }
     } catch (error) {
-        console.error('Error en auto-moderación:', error);
+        // Use the main logger for errors
+        logger.error(`Error en messageAutoMod para el mensaje de ${message.author.tag}:`, error);
     }
-} 
+}

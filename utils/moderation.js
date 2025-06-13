@@ -235,19 +235,24 @@ export async function getUserModHistory(guildId, userId) {
 }
 
 export function checkMessage(message) {
+    console.log(`[checkMessage] Verificando mensaje de ${message.author.tag}: "${message.content}"`);
     if (message.author.bot) return false;
 
     const rules = getAutoModRulesStorage(message.guild.id);
+    console.log(`[checkMessage] Reglas obtenidas para guild ${message.guild.name} (ID: ${message.guild.id}):`, JSON.stringify(rules, null, 2));
     if (!rules || rules.length === 0) return false;
 
     for (const rule of rules) {
+        console.log(`[checkMessage] Procesando regla: Tipo="${rule.rule_type}", Valor="${rule.rule_value}"`);
         switch (rule.rule_type) {
             case 'banned_words': {
-                const words = rule.rule_value.split(',').map(word => word.trim().toLowerCase());
-                const content = message.content.toLowerCase();
+                const wordsToBan = rule.rule_value.split(',').map(word => word.trim().toLowerCase());
+                const messageContentLower = message.content.toLowerCase();
+                console.log(`[checkMessage] Banned Words: Contenido="${messageContentLower}", PalabrasProhibidas="${wordsToBan}"`);
                 
-                for (const word of words) {
-                    if (content.includes(word)) {
+                for (const word of wordsToBan) {
+                    if (messageContentLower.includes(word)) {
+                        console.log(`[checkMessage] ¡PALABRA PROHIBIDA ENCONTRADA! Palabra: "${word}". Procediendo a borrar y advertir.`);
                         message.delete().catch(error => {
                             logger.error('Error al eliminar mensaje con palabra prohibida:', error);
                         });
@@ -276,9 +281,11 @@ export function checkMessage(message) {
             }
             case 'anti_mention': {
                 const maxMentions = parseInt(rule.rule_value);
-                const mentions = message.mentions.users.size + message.mentions.roles.size;
+                const mentionsCount = message.mentions.users.size + message.mentions.roles.size;
+                console.log(`[checkMessage] Anti-Menciones: MencionesEnMensaje="${mentionsCount}", MaxPermitidas="${maxMentions}"`);
 
-                if (mentions > maxMentions) {
+                if (mentionsCount > maxMentions) {
+                    console.log('[checkMessage] ¡EXCESO DE MENCIONES DETECTADO!');
                     message.delete().catch(error => {
                         logger.error('Error al eliminar mensaje con menciones excesivas:', error);
                     });
@@ -288,21 +295,57 @@ export function checkMessage(message) {
                 break;
             }
             case 'anti_link': {
-                const allowedDomains = rule.rule_value.split(',').map(domain => domain.trim());
                 const urlRegex = /(https?:\/\/[^\s]+)/g;
-                const urls = message.content.match(urlRegex);
+                const containsLink = urlRegex.test(message.content);
+                console.log(`[checkMessage] Anti-Enlaces: ContieneLink="${containsLink}", ValorRegla="${rule.rule_value}"`);
 
-                if (urls) {
-                    const hasDisallowedUrl = urls.some(url => {
-                        const domain = new URL(url).hostname;
-                        return !allowedDomains.some(allowed => domain.includes(allowed));
-                    });
+                if (containsLink) { // Basic check if any link exists
+                    const allowedDomains = rule.rule_value ? rule.rule_value.split(',').map(domain => domain.trim().toLowerCase()) : [];
+                    const urlsInMessage = message.content.match(urlRegex);
+                    let disallowedLinkFound = false;
 
-                    if (hasDisallowedUrl) {
+                    if (urlsInMessage) {
+                        if (allowedDomains.length === 0 && urlsInMessage.length > 0) {
+                            // If allowedDomains is empty, any link is considered disallowed if the rule is active.
+                            // However, the dashboard description implies "Dejar vacío para bloquear todos los enlaces excepto los de la lista blanca."
+                            // This means if rule_value is empty string, effectively NO links are allowed unless this logic is changed.
+                            // For now, let's assume an empty rule_value means "block all links if any are present".
+                            // A more robust way would be a specific flag or keyword if the rule_value itself being empty means "block all".
+                            // The current UI description "Dejar vacío para bloquear todos los enlaces excepto los de la lista blanca" is ambiguous.
+                            // Let's assume if rule_value is empty, it means NO external links are allowed.
+                            // This part might need refinement based on exact desired behavior of an empty allowedDomains list.
+                            // For the log, let's just say a link was found and action will be taken based on rule.
+                            // The current logic is: if allowedDomains is empty, any link is disallowed.
+                            // If allowedDomains has entries, only links NOT matching those are disallowed.
+                             disallowedLinkFound = true; // Default to true if any link and allowed list is empty
+                             if (allowedDomains.length > 0) { // only check domains if there's an allow list
+                                disallowedLinkFound = urlsInMessage.some(urlStr => {
+                                    try {
+                                        const domain = new URL(urlStr).hostname.toLowerCase();
+                                        return !allowedDomains.some(allowed => domain.includes(allowed));
+                                    } catch (e) { // Invalid URL
+                                        return true; // Treat invalid URLs as something to be moderated if links are being checked
+                                    }
+                                });
+                             }
+                        } else { // allowedDomains has entries
+                             disallowedLinkFound = urlsInMessage.some(urlStr => {
+                                try {
+                                    const domain = new URL(urlStr).hostname.toLowerCase();
+                                    return !allowedDomains.some(allowed => domain.includes(allowed));
+                                } catch (e) {
+                                    return true;
+                                }
+                            });
+                        }
+                    }
+
+                    if (disallowedLinkFound) {
+                        console.log('[checkMessage] ¡ENLACE DETECTADO Y BLOQUEADO (ejemplo)!');
                         message.delete().catch(error => {
                             logger.error('Error al eliminar mensaje con enlace no permitido:', error);
                         });
-                        message.channel.send(`⚠️ ${message.author}, los enlaces no están permitidos.`);
+                        message.channel.send(`⚠️ ${message.author}, los enlaces no están permitidos o no están en la lista blanca.`);
                         return true;
                     }
                 }
