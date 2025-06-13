@@ -152,23 +152,22 @@ client.once(Events.ClientReady, async readyClient => {
         // server.js already handles PORT definition and its own startup logging
         // We just need to ensure app.listen is called.
         // The PORT used by app.listen is defined within server.js
-        // No need to redefine it here unless we want to override server.js logic, which is not the case.
-        // Note: server.js uses process.env.PORT || 3000
-        const webServerPort = process.env.PORT || 3000; // For logging consistency here
+        // server.js now gets its port from config.webServerPort
+        // config.js handles PORT environment variable and default
+        const webServerPort = config.webServerPort;
 
-        // Check for essential environment variables for the web server
-        if (!process.env.SESSION_SECRET) {
-            logger.warn('Advertencia: SESSION_SECRET no está configurada. Usando un secreto por defecto e inseguro para la gestión de sesiones.');
-        }
-        if (!process.env.DISCORD_CLIENT_ID || !process.env.DISCORD_CLIENT_SECRET) {
-            logger.warn('Advertencia: DISCORD_CLIENT_ID o DISCORD_CLIENT_SECRET no están configuradas. Discord OAuth2 no funcionará correctamente.');
-        }
-        if (!process.env.DISCORD_REDIRECT_URI) {
-            logger.warn('Advertencia: DISCORD_REDIRECT_URI no está configurada. El callback de Discord OAuth2 podría fallar.');
-        }
+        // Warnings for missing DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, SESSION_SECRET
+        // are now handled in config.js upon its import.
+        // TOKEN warning is also in config.js
+        // No need to repeat them here unless for specific context not covered by config.js.
+
+        // A general check if config exists or critical values are missing can be added here if needed,
+        // but config.js already logs issues.
 
         app.listen(webServerPort, () => {
             logger.info(`🌐 Servidor web dashboard escuchando en http://localhost:${webServerPort}`);
+            // Log essential URLs or info related to the web server if helpful
+            logger.info(`🔑 OAuth2 Redirect URI configurada: ${config.discordRedirectUri}`);
         });
 
     } catch (error) {

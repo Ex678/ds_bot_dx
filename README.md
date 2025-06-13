@@ -8,32 +8,58 @@ Este es un bot multifuncional para Discord con varias características avanzadas
 El dashboard web integrado permite a los administradores de servidor configurar fácilmente las reglas de AutoMod para sus respectivos servidores de Discord a través de una interfaz gráfica amigable.
 
 ### Configuración Inicial
-Para que el bot y el dashboard web funcionen correctamente, es necesario configurar las siguientes variables de entorno:
+La configuración del bot y del dashboard web se gestiona principalmente a través del archivo `config.js` ubicado en la raíz del proyecto. Este archivo utiliza el paquete `dotenv` para cargar automáticamente valores desde un archivo `.env` si existe.
 
--   `TOKEN`: El token de tu bot de Discord. Esencial para que el bot se conecte a Discord.
--   `DISCORD_CLIENT_ID`: El ID de cliente de tu aplicación de Discord. Necesario para la autenticación OAuth2 para el dashboard.
--   `DISCORD_CLIENT_SECRET`: El secreto de cliente de tu aplicación de Discord. Necesario para la autenticación OAuth2.
--   `DISCORD_REDIRECT_URI`: La URI de redirección OAuth2 configurada en tu aplicación de Discord. Por defecto, para desarrollo local, debería ser algo como `http://localhost:3000/auth/discord/callback`.
--   `SESSION_SECRET`: Una cadena aleatoria y secreta utilizada para asegurar las sesiones de usuario en el dashboard web.
--   `PORT`: El puerto en el que se ejecutará el servidor web del dashboard (por defecto, 3000 si no se especifica).
+**Pasos recomendados para la configuración:**
 
-**Cómo obtener credenciales de Discord:**
+1.  **Crear un archivo `.env`**: En la raíz del proyecto, crea un archivo llamado `.env`. Este archivo es ignorado por Git (a través de `.gitignore`, si está configurado) y es ideal para almacenar tus credenciales y configuraciones locales.
+2.  **Poblar el archivo `.env`**: Añade las siguientes variables a tu archivo `.env`, reemplazando los valores de ejemplo con tus propias credenciales:
+
+    ```env
+    # Token de tu Bot de Discord
+    TOKEN=tu_token_de_bot_aqui
+
+    # Credenciales de la Aplicación de Discord para OAuth2 (Dashboard Web)
+    DISCORD_CLIENT_ID=tu_id_de_cliente_aqui
+    DISCORD_CLIENT_SECRET=tu_secreto_de_cliente_aqui
+    DISCORD_REDIRECT_URI=http://localhost:3000/auth/discord/callback # Ajusta si tu puerto o dominio es diferente
+
+    # Secreto para las sesiones del Dashboard Web
+    SESSION_SECRET=una_cadena_larga_aleatoria_y_segura_para_las_sesiones
+
+    # Puerto para el Dashboard Web (opcional, por defecto es 3000)
+    PORT=3000
+    ```
+
+3.  **Entender `config.js`**:
+    *   El archivo `config.js` intentará leer estas variables desde tu `.env`.
+    *   Si alguna variable no se encuentra en `.env`, `config.js` proporcionará valores placeholder o por defecto (ej. para `discordRedirectUri` y `webServerPort`).
+    *   **Es crucial que `TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, y `SESSION_SECRET` estén correctamente configurados, ya sea en `.env` o directamente en `config.js` (aunque no se recomienda para producción o si compartes el código).**
+
+**Variables de Configuración Clave (a través de `.env` o en `config.js`):**
+
+-   `token`: El token de tu bot de Discord. Esencial para que el bot se conecte.
+-   `discordClientId`: El ID de Cliente de tu aplicación de Discord.
+-   `discordClientSecret`: El Secreto de Cliente de tu aplicación de Discord.
+-   `discordRedirectUri`: La URI de redirección OAuth2.
+    *   Para desarrollo local: `http://localhost:3000/auth/discord/callback` (si usas el puerto 3000).
+    *   Para producción: Deberá ser la URL pública donde tu dashboard esté accesible, seguida de `/auth/discord/callback`.
+-   `sessionSecret`: Una cadena larga, aleatoria y segura utilizada para proteger las sesiones de usuario. ¡Cámbiala del valor por defecto!
+-   `webServerPort`: El puerto en el que se ejecutará el servidor web. Se toma de la variable de entorno `PORT` o usa `3000` por defecto.
+
+**Cómo obtener las credenciales de Discord (`token`, `discordClientId`, `discordClientSecret`):**
 1.  Ve al [Portal de Desarrolladores de Discord](https://discord.com/developers/applications).
-2.  Crea una nueva aplicación.
-3.  En la pestaña "Bot", crea un bot y copia el `TOKEN`.
-4.  En la pestaña "OAuth2" -> "General":
-    *   Copia el `CLIENT ID` y el `CLIENT SECRET`.
-    *   En la sección "Redirects", añade la URI que usarás (ej. `http://localhost:3000/auth/discord/callback`). Asegúrate de que coincida exactamente con `DISCORD_REDIRECT_URI`.
-
-Se recomienda crear un archivo `.env` en la raíz del proyecto para gestionar estas variables:
-```env
-TOKEN=tu_token_de_bot
-DISCORD_CLIENT_ID=tu_client_id
-DISCORD_CLIENT_SECRET=tu_client_secret
-DISCORD_REDIRECT_URI=http://localhost:3000/auth/discord/callback
-SESSION_SECRET=tu_secreto_de_sesion_muy_seguro
-PORT=3000
-```
+2.  Crea una "Nueva Aplicación" o selecciona una existente.
+3.  **Para el `token` del bot**:
+    *   Navega a la pestaña "Bot".
+    *   Haz clic en "Add Bot" (si es una nueva aplicación).
+    *   Puedes ver/copiar el token haciendo clic en "Reset Token" o "View Token" (si ya existe). ¡Trata este token como una contraseña!
+4.  **Para `discordClientId` y `discordClientSecret`**:
+    *   Navega a la pestaña "OAuth2" -> "General".
+    *   Aquí encontrarás el "CLIENT ID" (`discordClientId`).
+    *   Puedes ver/copiar el "CLIENT SECRET" (`discordClientSecret`) haciendo clic en "Reset Secret".
+5.  **Para `discordRedirectUri`**:
+    *   En la misma pestaña "OAuth2" -> "General", en la sección "Redirects", añade la URI completa. Por ejemplo: `http://localhost:3000/auth/discord/callback`. Asegúrate de que esta URI coincida exactamente con la que configuras en `DISCORD_REDIRECT_URI` en tu archivo `.env` o `config.js`.
 
 ### Acceso y Uso
 1.  **Iniciar el Bot y Servidor Web**: Ejecuta `node index.js` en la terminal desde la raíz del proyecto. Esto iniciará tanto el bot de Discord como el servidor web para el dashboard.

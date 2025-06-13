@@ -1,15 +1,15 @@
 import express from 'express';
 import axios from 'axios';
+import { config } from '../../config.js'; // Import config
 
 const router = express.Router();
 
-// Placeholder for Discord OAuth2 credentials and configuration
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || 'YOUR_DISCORD_CLIENT_ID';
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || 'YOUR_DISCORD_CLIENT_SECRET';
-const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || 'http://localhost:3000/auth/discord/callback'; // Adjust port if needed
+// Use values from config.js
+const DISCORD_CLIENT_ID = config.discordClientId;
+const DISCORD_CLIENT_SECRET = config.discordClientSecret;
+const DISCORD_REDIRECT_URI = config.discordRedirectUri;
 
 // Session middleware is now handled globally in server.js
-// router.use(session({...})); // Removed
 
 // Route to initiate Discord OAuth2 login
 router.get('/discord', (req, res) => {
