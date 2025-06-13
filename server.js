@@ -1,10 +1,11 @@
 import express from 'express';
 import session from 'express-session';
+import { config } from './config.js'; // Import config
 import authRouter from './server/auth.js';
-import autoModRouter from './server/routes/automod.js'; // Import the new automod router
+import autoModRouter from './server/routes/automod.js';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = config.webServerPort; // Use port from config
 
 // Middleware to parse JSON bodies
 app.use(express.json());
@@ -16,7 +17,7 @@ app.use(express.static('server/public'));
 // Note: In a production environment, the secret should be a strong, unique string
 // ideally stored in an environment variable.
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'a_placeholder_secret_key_that_should_be_changed',
+  secret: config.sessionSecret, // Use session secret from config
   resave: false, // Do not save session if unmodified
   saveUninitialized: false, // Do not create session until something stored
   cookie: {
