@@ -17,7 +17,7 @@ router.get('/discord', (req, res) => {
     client_id: DISCORD_CLIENT_ID,
     redirect_uri: DISCORD_REDIRECT_URI,
     response_type: 'code',
-    scope: 'identify guilds' // Adjust scopes as needed
+    scope: 'identify guilds' // Ensure 'guilds' scope is requested
   });
   const discordLoginUrl = `https://discord.com/api/oauth2/authorize?${params.toString()}`;
   res.redirect(discordLoginUrl);
@@ -39,7 +39,7 @@ router.get('/discord/callback', async (req, res) => {
       grant_type: 'authorization_code',
       code: code,
       redirect_uri: DISCORD_REDIRECT_URI,
-      scope: 'identify guilds' // Ensure scopes match
+      scope: 'identify guilds' // Ensure scopes match what was requested
     }), {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
@@ -49,22 +49,50 @@ router.get('/discord/callback', async (req, res) => {
     const { access_token, token_type } = tokenResponse.data;
 
     // Fetch user data from Discord
-    const userResponse = await axios.get('https://discord.com/api/users/@me', {
-      headers: {
-        authorization: `${token_type} ${access_token}`
-      }
-    });
+    let userResponse;
+    try {
+      userResponse = await axios.get('https://discord.com/api/users/@me', {
+        headers: {
+          authorization: `${token_type} ${access_token}`
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching user data from Discord API (/users/@me):', error.response ? error.response.data : error.message);
+      // If user data fetch fails, it's a critical error for authentication.
+      return res.status(500).send('Error fetching user data from Discord.');
+    }
 
-    // Store user data in session (example)
+
+    // Fetch user guilds from Discord
+    let guildsResponse;
+    try {
+      guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
+        headers: {
+          authorization: `${token_type} ${access_token}`
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching user guilds from Discord API (/users/@me/guilds):', error.response ? error.response.data : error.message);
+      // If guilds fetch fails, we might still proceed with basic user data,
+      // or treat it as an error depending on application requirements.
+      // For this dashboard, guilds are essential.
+      return res.status(500).send('Error fetching user guilds from Discord.');
+    }
+
+
+    // Store user data and guilds in session
     req.session.discordUser = userResponse.data;
-    req.session.accessToken = access_token;
+    req.session.discordUser.guilds = guildsResponse.data; // Attach guilds to the user object
+    req.session.accessToken = access_token; // Store access token if needed elsewhere
 
     // Redirect to the home page
     res.redirect('/');
 
   } catch (error) {
-    console.error('Error during Discord OAuth2 callback:', error.response ? error.response.data : error.message);
-    res.status(500).send('Error during authentication.');
+    // This catch block will handle errors from the token exchange primarily,
+    // or any other errors not caught by the specific try-catch blocks for API calls.
+    console.error('Error during Discord OAuth2 callback (token exchange or other):', error.response ? error.response.data : error.message);
+    res.status(500).send('Error during authentication process.');
   }
 });
 
@@ -72,9 +100,14 @@ router.get('/discord/callback', async (req, res) => {
 router.get('/logout', (req, res) => {
   req.session.destroy(err => {
     if (err) {
+      // Log the error but still try to redirect, or handle more gracefully
+      console.error("Error destroying session:", err);
       return res.status(500).send('Could not log out.');
     }
-    res.redirect('/'); // Redirect to home page after logout
+    // Ensure response is sent only once
+    if (!res.headersSent) {
+        res.redirect('/'); // Redirect to home page after logout
+    }
   });
 });
 
