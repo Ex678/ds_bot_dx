@@ -4,7 +4,8 @@ import { config } from './config.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readdirSync } from 'fs';
-import express from 'express';
+// import express from 'express'; // No longer directly used here
+import app from './server.js'; // Import the Express app
 import * as youtubeNotifier from './events/youtubeNotifier.js';
 import { handleMessageForXP, checkAndHandleLevelUp, handleRoleRewards } from './features/levelingSystem.js';
 import { initializeStorage, closeStorage } from './utils/storage.js';
@@ -146,8 +147,32 @@ client.once(Events.ClientReady, async readyClient => {
         
         // Iniciar notificador de YouTube
         await youtubeNotifier.execute(readyClient);
+
+        // Start the Express web server
+        // server.js already handles PORT definition and its own startup logging
+        // We just need to ensure app.listen is called.
+        // The PORT used by app.listen is defined within server.js
+        // No need to redefine it here unless we want to override server.js logic, which is not the case.
+        // Note: server.js uses process.env.PORT || 3000
+        const webServerPort = process.env.PORT || 3000; // For logging consistency here
+
+        // Check for essential environment variables for the web server
+        if (!process.env.SESSION_SECRET) {
+            logger.warn('Advertencia: SESSION_SECRET no está configurada. Usando un secreto por defecto e inseguro para la gestión de sesiones.');
+        }
+        if (!process.env.DISCORD_CLIENT_ID || !process.env.DISCORD_CLIENT_SECRET) {
+            logger.warn('Advertencia: DISCORD_CLIENT_ID o DISCORD_CLIENT_SECRET no están configuradas. Discord OAuth2 no funcionará correctamente.');
+        }
+        if (!process.env.DISCORD_REDIRECT_URI) {
+            logger.warn('Advertencia: DISCORD_REDIRECT_URI no está configurada. El callback de Discord OAuth2 podría fallar.');
+        }
+
+        app.listen(webServerPort, () => {
+            logger.info(`🌐 Servidor web dashboard escuchando en http://localhost:${webServerPort}`);
+        });
+
     } catch (error) {
-        logger.error('Error al inicializar:', error);
+        logger.error('Error al inicializar el bot o el servidor web:', error);
         process.exit(1);
     }
 });
