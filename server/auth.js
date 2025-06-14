@@ -1,11 +1,11 @@
 import express from 'express';
 import axios from 'axios';
-import { config } from '../../config.js'; // Import config
+import { config } from '../config.js'; // Import config
 
 const router = express.Router();
 
 // Use values from config.js
-const DISCORD_CLIENT_ID = config.discordClientId;
+const DISCORD_CLIENT_ID = config.clientId;
 const DISCORD_CLIENT_SECRET = config.discordClientSecret;
 const DISCORD_REDIRECT_URI = config.discordRedirectUri;
 

@@ -2,11 +2,33 @@
   "912887622433636392": [
     {
       "rule_type": "banned_words",
-      "rule_value": "nigga, porno"
+      "rule_value": "nigga, porno, sexo"
     },
     {
       "rule_type": "anti_spam",
-      "rule_value": null
+      "rule_value": "3"
+    },
+    {
+      "rule_type": "anti_mention",
+      "rule_value": "1"
+    },
+    {
+      "rule_type": "anti_link",
+      "rule_value": "google.com"
+    }
+  ],
+  "1265373895691731054": [
+    {
+      "rule_type": "banned_words",
+      "rule_value": "SEXOOOOOOOOOOOOOOO"
+    },
+    {
+      "rule_type": "anti_spam",
+      "rule_value": "0"
+    },
+    {
+      "rule_type": "anti_mention",
+      "rule_value": "0"
     }
   ]
 }
